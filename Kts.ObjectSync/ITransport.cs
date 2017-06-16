@@ -1,13 +1,12 @@
 ﻿using System;
+using System.Threading.Tasks;
 
 namespace Kts.ObjectSync.Common
 {
-	public enum ConnectionState { Disconnected, Disconnecting, Connecting, Connected }
-	public interface ITransport: IDisposable
+	public interface ITransport
 	{
-		void Send(string fullName, object value);
+		Task Send(string fullName, object value);
 		event Action<string, object> Receive;
-		event Action<string> Disconnected;
 	}
 
 	public sealed class Package

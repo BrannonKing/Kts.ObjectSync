@@ -1,41 +1,67 @@
-﻿using Kts.ObjectSync.Common;
-using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.WebSockets;
+using System.Threading;
 using System.Threading.Tasks;
+using CommonSerializer;
+using Kts.ObjectSync.Common;
+using Microsoft.IO;
 
 namespace Kts.ObjectSync.Transport.AspNetCore
 {
 	// some ideas taken from: https://radu-matei.github.io/blog/aspnet-core-websockets-middleware/	
 	public class ServerMiddlewareTransport: ITransport
 	{
+		private readonly ICommonSerializer _serializer;
 		public event Action<string, object> Receive;
-		public event Action<string> Disconnected;
+
+		public ServerMiddlewareTransport(ICommonSerializer serializer)
+		{
+			_serializer = serializer;
+		}
 
 		public IApplicationBuilder Attach(IApplicationBuilder builder, PathString path)
 		{
-			return builder.Map(path, app => app.UseMiddleware<InnerServerMiddlewareTransport>());
+			return builder.Map(path, app => app.UseMiddleware<InnerServerMiddlewareTransport>(this));
 		}
 
-		public void Dispose()
+		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
+		
+		public async Task Send(string fullName, object value)
 		{
-			
+			var package = new Package { Name = fullName, Data = value };
+			using (var stream = _mgr.GetStream(fullName))
+			{
+				_serializer.Serialize(stream, package);
+				if (stream.TryGetBuffer(out var buffer))
+				{
+					var tasks = new List<Task>();
+					lock (_sockets)
+						foreach (var socket in _sockets)
+						{
+							tasks.Add(socket.SendAsync(buffer,
+								_serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary,
+								true, CancellationToken.None));
+						}
+					await Task.WhenAll(tasks);
+				}
+			}
 		}
 
-		public void Send(string fullName, object value)
-		{
-			throw new NotImplementedException();
-		}
+		private readonly List<WebSocket> _sockets = new List<WebSocket>();
 
 		public class InnerServerMiddlewareTransport
 		{
 			private readonly RequestDelegate _next;
-			private readonly ObjectManager _manager;
+			private readonly ServerMiddlewareTransport _parent;
 
-			public InnerServerMiddlewareTransport(RequestDelegate next, ObjectManager manager)
+			public InnerServerMiddlewareTransport(RequestDelegate next, ServerMiddlewareTransport parent)
 			{
 				_next = next;
-				_manager = manager;
+				_parent = parent;
 			}
 
 			public async Task Invoke(HttpContext context)
@@ -48,38 +74,46 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				}
 
 				var socket = await context.WebSockets.AcceptWebSocketAsync();
-				await _webSocketHandler.OnConnected(socket);
-
-				await ReceiveForever(socket, async (result, buffer) =>
-				{
-					if (result.MessageType == WebSocketMessageType.Text)
-					{
-						await _webSocketHandler.ReceiveAsync(socket, result, buffer);
-						return;
-					}
-					else if (result.MessageType == WebSocketMessageType.Binary)
-					{
-
-					}
-					else if (result.MessageType == WebSocketMessageType.Close)
-					{
-						await _webSocketHandler.OnDisconnected(socket);
-						return;
-					}
-					else throw new NotImplementedException();
-				});
+				lock(_parent._sockets)
+					_parent._sockets.Add(socket);
+				await ReceiveForever(socket);
+				lock (_parent._sockets)
+					_parent._sockets.Remove(socket);
 			}
 
-			private async Task ReceiveForever(WebSocket socket, Action<WebSocketReceiveResult, byte[]> handleMessage)
+			private async Task ReceiveForever(WebSocket socket)
 			{
-				var buffer = new byte[1024 * 8];
+				ArraySegment<Byte> buffer = new ArraySegment<byte>(new Byte[8192]);
 
-				while (socket.State == WebSocketState.Open)
+				try
 				{
-					var result = await socket.ReceiveAsync(buffer: new ArraySegment<byte>(buffer), CancellationToken.None);
-					handleMessage(result, buffer);
+					using (var stream = new MemoryStream())
+					{
+						while (socket.State == WebSocketState.Open)
+						{
+							stream.Position = 0;
+							WebSocketReceiveResult result;
+							do
+							{
+								result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+								if (result.CloseStatus != null)
+								{
+									// client's gone; be done with them; they will have to reinitiate comms
+									return;
+								}
+								stream.Write(buffer.Array, buffer.Offset, result.Count);
+							} while (!result.EndOfMessage);
+
+							stream.Position = 0;
+
+							var package = _parent._serializer.Deserialize<Package>(stream);
+							_parent.Receive.Invoke(package.Name, package.Data);
+						}
+					}
 				}
+				catch (TaskCanceledException) { }
 			}
+
 		}
 	}
 }
