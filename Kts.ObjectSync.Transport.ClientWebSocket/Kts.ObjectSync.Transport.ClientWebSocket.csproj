@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Kts.ObjectSync\Kts.ObjectSync.Common.csproj" />
+    <ProjectReference Include="..\Kts.ObjectSync.Common\Kts.ObjectSync.Common.csproj" />
   </ItemGroup>
 
 </Project>
