@@ -2,7 +2,6 @@
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -87,7 +86,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 
 				try
 				{
-					using (var stream = new MemoryStream())
+					using (var stream = _mgr.GetStream("_Receiver"))
 					{
 						while (socket.State == WebSocketState.Open)
 						{

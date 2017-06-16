@@ -1,24 +1,9 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.ComponentModel;
 
 namespace Kts.ObjectSync.Common
 {
-	public abstract class ObjectForSynchronization
-	{
-		public abstract string ID { get; }
-		protected virtual bool ShouldReceive(string fullPath)
-		{
-			return true;
-		}
-		protected virtual bool ShouldSend(string fullPath)
-		{
-			return true;
-		}
-
-	}
-
 	public class ObjectManager
     {
 		private readonly ITransport _transport;
@@ -44,20 +29,30 @@ namespace Kts.ObjectSync.Common
 
 	    private class ObjectForSynchronizationWrapper : ObjectForSynchronization
 	    {
-		    public ObjectForSynchronizationWrapper(string id, object child)
+		    private readonly bool _shouldSendOnConnected;
+
+		    public ObjectForSynchronizationWrapper(string id, object child, bool shouldSendOnConnected)
 		    {
-				ID = id;
+			    _shouldSendOnConnected = shouldSendOnConnected;
+			    ID = id;
 				Child = child;
 		    }
 
-		    public override string ID { get; }
+			public override string ID { get; }
+
+		    protected override bool ShouldSendOnConnected(string fullPath)
+		    {
+			    return _shouldSendOnConnected;
+		    }
+
+		    // ReSharper disable once UnusedAutoPropertyAccessor.Local
 			public object Child { get; }
 	    }
 
 
-		public void Add(string id, object objectForSynchronization)
+		public void Add(string id, object objectForSynchronization, bool shouldSendOnConnected = false)
 		{
-			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization));
+			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization, shouldSendOnConnected));
 		}
 
 	    public void Remove(string idOfObjectForSynchronization)

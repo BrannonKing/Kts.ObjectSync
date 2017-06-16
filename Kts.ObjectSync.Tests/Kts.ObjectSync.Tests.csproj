@@ -1,13 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>    
-    <TargetFramework>netcoreapp1.1</TargetFramework>
+    <TargetFramework>netstandard1.6</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.0.0" />
+	<PackageReference Include="CommonSerializer.Newtonsoft.Json" Version="1.1.1" />
+	<PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.0.0" />
+	<PackageReference Include="Microsoft.AspNetCore" Version="1.1.2" />
+	<PackageReference Include="Microsoft.AspNetCore.WebSockets.Server" Version="0.1.0" />
     <PackageReference Include="xunit" Version="2.2.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kts.ObjectSync.Common\Kts.ObjectSync.Common.csproj" />
+    <ProjectReference Include="..\Kts.ObjectSync.Transport.AspNetCore\Kts.ObjectSync.Transport.AspNetCore.csproj" />
+    <ProjectReference Include="..\Kts.ObjectSync.Transport.ClientWebSocket\Kts.ObjectSync.Transport.ClientWebSocket.csproj" />
   </ItemGroup>
 
   <ItemGroup>
