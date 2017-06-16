@@ -1,13 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.26430.12
+VisualStudioVersion = 15.0.26430.13
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kts.ObjectSync", "Kts.ObjectSync\Kts.ObjectSync.csproj", "{9478D193-BD77-414E-9916-1E79969351C3}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kts.ObjectSync.Common", "Kts.ObjectSync\Kts.ObjectSync.Common.csproj", "{9478D193-BD77-414E-9916-1E79969351C3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kts.ObjectSync.Tests", "Kts.ObjectSync.Tests\Kts.ObjectSync.Tests.csproj", "{9DFE6728-6BEF-4A28-A0C5-7B2C37956B13}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kts.ObjectSync.Middleware", "Kts.ObjectSync.Middleware\Kts.ObjectSync.Middleware.csproj", "{BBDD6F54-CA76-4DD6-B41A-2DA38A3D8D54}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kts.ObjectSync.Transport.AspNetCore", "Kts.ObjectSync.Middleware\Kts.ObjectSync.Transport.AspNetCore.csproj", "{BBDD6F54-CA76-4DD6-B41A-2DA38A3D8D54}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kts.ObjectSync.Transport.ClientWebSocket", "Kts.ObjectSync.Transport.ClientWebSocket\Kts.ObjectSync.Transport.ClientWebSocket.csproj", "{68E66EB5-AE7D-49EB-B387-D1AC26E862D6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -27,6 +29,10 @@ Global
 		{BBDD6F54-CA76-4DD6-B41A-2DA38A3D8D54}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BBDD6F54-CA76-4DD6-B41A-2DA38A3D8D54}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BBDD6F54-CA76-4DD6-B41A-2DA38A3D8D54}.Release|Any CPU.Build.0 = Release|Any CPU
+		{68E66EB5-AE7D-49EB-B387-D1AC26E862D6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{68E66EB5-AE7D-49EB-B387-D1AC26E862D6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{68E66EB5-AE7D-49EB-B387-D1AC26E862D6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{68E66EB5-AE7D-49EB-B387-D1AC26E862D6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

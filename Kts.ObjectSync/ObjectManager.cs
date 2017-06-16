@@ -3,50 +3,46 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 
-namespace Kts.ObjectSync
+namespace Kts.ObjectSync.Common
 {
-	public interface IObjectForSynchronization : INotifyPropertyChanged
+	public abstract class ObjectForSynchronization
 	{
-		string ID { get; }
-	}
-
-	public abstract class ObjectUpdater
-	{
-		internal ObjectUpdater()
+		public abstract string ID { get; }
+		protected virtual bool ShouldReceive(string fullPath)
 		{
-			// you no can use
+			return true;
 		}
-		protected abstract void HandleUpdate(string id, string[] propertyPath, string value);
+		protected virtual bool ShouldSend(string fullPath)
+		{
+			return true;
+		}
 
 	}
 
-    public class ObjectManager: ObjectUpdater
+	public class ObjectManager
     {
-	    public ObjectManager(IEnumerable<IObjectForSynchronization> objectsForSynchronization)
+		private readonly ITransport _transport;
+	    public ObjectManager(ITransport transport, IEnumerable<ObjectForSynchronization> objectsForSynchronization = null)
 	    {
-		    foreach (var ofs in objectsForSynchronization)
-			    Add(ofs);
+			_transport = transport;
+			if (objectsForSynchronization != null)
+				foreach (var ofs in objectsForSynchronization)
+					Add(ofs);
 	    }
-
-	    public ObjectManager()
-	    {
-	    }
-
-	    public event Action<ConnectionState> ConnectionStateChanged = delegate { };
 
 	    private readonly ConcurrentDictionary<string, PropertyNode> _nodeCache = new ConcurrentDictionary<string, PropertyNode>();
 
-	    public void Add(IObjectForSynchronization objectForSynchronization)
+	    public void Add(ObjectForSynchronization objectForSynchronization)
 	    {
 		    if (objectForSynchronization == null)
 			    throw new ArgumentNullException(nameof(objectForSynchronization));
 
-		    var rootNode = new PropertyNode(objectForSynchronization, objectForSynchronization is ObjectForSynchronizationWrapper);
+		    var rootNode = new PropertyNode(_transport, objectForSynchronization.ID, objectForSynchronization);
 		    if (!_nodeCache.TryAdd(objectForSynchronization.ID, rootNode))
 			    throw new ArgumentException($"Object {objectForSynchronization.ID} added twice. Make sure IDs differ between objects.");
 	    }
 
-	    private class ObjectForSynchronizationWrapper : IObjectForSynchronization
+	    private class ObjectForSynchronizationWrapper : ObjectForSynchronization
 	    {
 		    public ObjectForSynchronizationWrapper(string id, object child)
 		    {
@@ -54,9 +50,7 @@ namespace Kts.ObjectSync
 				Child = child;
 		    }
 
-			public event PropertyChangedEventHandler PropertyChanged;
-		    public string ID { get; }
-
+		    public override string ID { get; }
 			public object Child { get; }
 	    }
 
@@ -72,15 +66,9 @@ namespace Kts.ObjectSync
 			    node.Dispose(); // disposes all children as well
 	    }
 
-	    public void Remove(IObjectForSynchronization objectForSynchronization)
+	    public void Remove(ObjectForSynchronization objectForSynchronization)
 	    {
 		    Remove(objectForSynchronization.ID);
-	    }
-
-	    protected override void HandleUpdate(string id, string[] propertyPath, string value)
-	    {
-		    if (_nodeCache.TryGetValue(id, out var node))
-			    node.Update(propertyPath, value);
 	    }
     }
 }
