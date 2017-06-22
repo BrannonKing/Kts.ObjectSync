@@ -15,7 +15,7 @@ using Xunit;
 
 namespace Kts.ObjectSync.Tests
 {
-	public class UnitTests
+	public class RoundTripTests
 	{
 		[Fact]
 		public async Task Test()
@@ -23,10 +23,10 @@ namespace Kts.ObjectSync.Tests
 			var serializer = new JsonCommonSerializer();
 
 			var serverObj = new Tester{P2 = 23, P3 = "abc"};
-			var serverTransport = new ServerMiddlewareTransport(serializer);
-			var serverMgr = new ObjectManager(serverTransport);
-			serverMgr.Add("a", serverObj, true);
-			await Startup.RunServer(serverTransport);
+			var serverTransport = new ServerMiddlewareTransport(serializer); // never throws
+			var serverMgr = new ObjectManager(serverTransport); // never throws
+			serverMgr.Add("a", serverObj, true); // never throws
+			await Startup.StartServer(serverTransport); // should throw if it can't start
 
 			var clientTransport = await ClientWebSocketTransport.Connect(new Uri("http://localhost/"), serializer);
 			var clientMgr = new ObjectManager(clientTransport);
@@ -56,26 +56,23 @@ namespace Kts.ObjectSync.Tests
 				}
 
 				app.UseWebSockets();
-
-				app.Run(async (context) =>
-				{
-					await context.Response.WriteAsync("Hello World!");
-				});
 			}
 
 
-			public static Task RunServer()
+			public static Task StartServer(ServerMiddlewareTransport transport)
 			{
 				var tcs = new TaskCompletionSource<bool>();
 				Task.Run(() =>
 				{
-					var host = new WebHostBuilder()
+					var builder = new WebHostBuilder()
 						.UseKestrel()
 						//.UseContentRoot(Directory.GetCurrentDirectory())
 						//.UseIISIntegration()
 						.UseStartup<Startup>()
 						//.UseApplicationInsights()
-						.Build();
+						;
+					builder.Configure(app => transport.Attach(app, "ObjSync"));
+					var host = builder.Build();
 
 					host.Run();
 					tcs.SetResult(true);

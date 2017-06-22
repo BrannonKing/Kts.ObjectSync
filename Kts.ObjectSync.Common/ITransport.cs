@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Kts.ObjectSync.Common
@@ -11,7 +12,6 @@ namespace Kts.ObjectSync.Common
 
 	public sealed class Package
 	{
-		public string Name { get; set; }
-		public object Data { get; set; }
+		public IReadOnlyList<KeyValuePair<string, object>> Data { get; set; }
 	}
 }
