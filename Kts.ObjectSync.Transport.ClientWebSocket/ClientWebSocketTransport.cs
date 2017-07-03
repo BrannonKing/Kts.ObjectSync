@@ -158,6 +158,16 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 		}
 
 		public event Action<string, object> Receive = delegate { };
+		private Action<ITransport> _connected;
+		public event Action<ITransport> Connected
+		{
+			add
+			{
+				_connected = (Action<ITransport>)Delegate.Combine(_connected, value);
+				value.Invoke(this);
+			}
+			remove => _connected = (Action<ITransport>)Delegate.Remove(_connected, value);
+		}
 
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 

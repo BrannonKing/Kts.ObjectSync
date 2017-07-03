@@ -8,6 +8,7 @@ namespace Kts.ObjectSync.Common
 	{
 		void Send(string fullName, object value);
 		event Action<string, object> Receive;
+		event Action<ITransport> Connected;
 	}
 
 	public sealed class Package

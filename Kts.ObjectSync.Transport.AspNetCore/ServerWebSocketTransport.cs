@@ -17,6 +17,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 	{
 		private readonly ICommonSerializer _serializer;
 		public event Action<string, object> Receive;
+		public event Action<ITransport> Connected;
 		private readonly IActor<RecyclableMemoryStream, Task> _actor;
 		private readonly List<WebSocket> _sockets = new List<WebSocket>();
 
@@ -99,6 +100,33 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 			_actor.Push(stream);
 		}
 
+		private class OneTimeTransport : ITransport
+		{
+			private readonly WebSocket _socket;
+			private readonly ICommonSerializer _serializer;
+
+			public OneTimeTransport(WebSocket socket, ICommonSerializer serializer)
+			{
+				_socket = socket;
+				_serializer = serializer;
+			}
+
+			public async void Send(string fullName, object value)
+			{
+				var package = new Package { Name = fullName, Data = value };
+				using (var stream = (RecyclableMemoryStream) _mgr.GetStream(fullName))
+				{
+					_serializer.Serialize(stream, package);
+					var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
+					var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
+					await _socket.SendAsync(buffer, msgType, true, CancellationToken.None);
+				}
+			}
+
+			public event Action<string, object> Receive = delegate { };
+			public event Action<ITransport> Connected = delegate { };
+		}
+
 		public class InnerServerMiddlewareTransport
 		{
 			private readonly RequestDelegate _next;
@@ -122,6 +150,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				var socket = await context.WebSockets.AcceptWebSocketAsync();
 				lock (_parent._sockets)
 					_parent._sockets.Add(socket);
+				_parent.Connected.Invoke(new OneTimeTransport(socket, _parent._serializer));
 				await ReceiveForever(socket);
 				lock (_parent._sockets)
 					_parent._sockets.Remove(socket);

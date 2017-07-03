@@ -22,7 +22,7 @@ namespace Kts.ObjectSync.Common
 		    if (objectForSynchronization == null)
 			    throw new ArgumentNullException(nameof(objectForSynchronization));
 
-		    var rootNode = new PropertyNode(_transport, objectForSynchronization.ID, objectForSynchronization, typeof(object));
+		    var rootNode = new PropertyNode(_transport, objectForSynchronization);
 		    if (!_nodeCache.TryAdd(objectForSynchronization.ID, rootNode))
 			    throw new ArgumentException($"Object {objectForSynchronization.ID} added twice. Make sure IDs differ between objects.");
 	    }
@@ -40,7 +40,7 @@ namespace Kts.ObjectSync.Common
 
 			public override string ID { get; }
 
-		    protected override bool ShouldSendOnConnected(string fullPath)
+		    protected internal override bool ShouldSendOnConnected(string fullPath)
 		    {
 			    return _shouldSendOnConnected;
 		    }

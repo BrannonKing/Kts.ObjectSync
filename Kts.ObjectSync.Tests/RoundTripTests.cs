@@ -44,6 +44,7 @@ namespace Kts.ObjectSync.Tests
 
 			// left off: wait for what?
 			// 1. We need the ability to send the whole object every time a connection is made.
+			// 2. We should bypass any type conversion for the primary JSON types
 		}
 
 		public class Startup
