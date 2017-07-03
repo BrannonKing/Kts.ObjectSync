@@ -8,18 +8,78 @@ using System.Threading.Tasks;
 using CommonSerializer;
 using Kts.ObjectSync.Common;
 using Microsoft.IO;
+using Kts.ActorsLite;
 
 namespace Kts.ObjectSync.Transport.AspNetCore
 {
 	// some ideas taken from: https://radu-matei.github.io/blog/aspnet-core-websockets-middleware/	
-	public class ServerMiddlewareTransport: ITransport
+	public class ServerMiddlewareTransport : ITransport
 	{
 		private readonly ICommonSerializer _serializer;
 		public event Action<string, object> Receive;
+		private readonly IActor<RecyclableMemoryStream> _actor;
+		private readonly List<WebSocket> _sockets = new List<WebSocket>();
 
-		public ServerMiddlewareTransport(ICommonSerializer serializer)
+		public ServerMiddlewareTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
+			var periodMs = (int)Math.Round(TimeSpan.FromSeconds(aggregationDelay).TotalMilliseconds);
+			var mainBuffer = _mgr.GetStream("MainClientBuffer");
+			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
+			SetAction<RecyclableMemoryStream> action = async (stream, token, isFirst, isLast) =>
+			{
+			// if we're the first in a set but our buffer isn't empty, send it (should't happen with these actors)
+			// if we're the first in a set make a new buffer
+			// copy our current stream in to the buffer
+			// if we're the last in the set ship the buffer
+			// the far end needs to keep pulling packages out of the buffer as long as there are more bytes
+
+			// how can we do this without two copies?
+			// we can push the same stream in every time (make a new stream if we can't get the lock on the previous)
+			// maybe we need a "unique value" actor
+
+			try
+				{
+					ArraySegment<byte> buffer;
+					if (isFirst && isLast && mainBuffer.Position == 0 && stream.TryGetBuffer(out buffer))
+					{
+						await SendAsync(buffer, msgType);
+						return;
+					}
+
+					if (isFirst && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					{
+						await SendAsync(buffer, msgType);
+						mainBuffer.Position = 0;
+					}
+
+					stream.CopyTo(mainBuffer);
+
+					if (isLast && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					{
+						await SendAsync(buffer, msgType);
+						mainBuffer.Position = 0;
+					}
+				}
+				catch (TaskCanceledException)
+				{
+					return;
+				}
+				finally
+				{
+					stream.Dispose();
+				}
+			};
+			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream>)new PeriodicAsyncActor<RecyclableMemoryStream>(action, periodMs) : new OrderedSyncActor<RecyclableMemoryStream>(action);
+		}
+
+		private async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType msgType)
+		{
+			var tasks = new List<Task>(_sockets.Count); // count may be off being outside the lock, but shouldn't be splinched
+			lock (_sockets)
+				foreach (var socket in _sockets)
+					tasks.Add(socket.SendAsync(buffer, msgType, true, CancellationToken.None));
+			await Task.WhenAll(tasks);
 		}
 
 		public IApplicationBuilder Attach(IApplicationBuilder builder, PathString path)
@@ -28,29 +88,14 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 		}
 
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
-		
-		public async Task Send(string fullName, object value)
+
+		public void Send(string fullName, object value)
 		{
 			var package = new Package { Name = fullName, Data = value };
-			using (var stream = _mgr.GetStream(fullName))
-			{
-				_serializer.Serialize(stream, package);
-				if (stream.TryGetBuffer(out var buffer))
-				{
-					var tasks = new List<Task>();
-					lock (_sockets)
-						foreach (var socket in _sockets)
-						{
-							tasks.Add(socket.SendAsync(buffer,
-								_serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary,
-								true, CancellationToken.None));
-						}
-					await Task.WhenAll(tasks);
-				}
-			}
+			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullName);
+			_serializer.Serialize(stream, package);
+			_actor.Push(stream);
 		}
-
-		private readonly List<WebSocket> _sockets = new List<WebSocket>();
 
 		public class InnerServerMiddlewareTransport
 		{
@@ -73,7 +118,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				}
 
 				var socket = await context.WebSockets.AcceptWebSocketAsync();
-				lock(_parent._sockets)
+				lock (_parent._sockets)
 					_parent._sockets.Add(socket);
 				await ReceiveForever(socket);
 				lock (_parent._sockets)

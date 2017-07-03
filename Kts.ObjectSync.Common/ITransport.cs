@@ -6,12 +6,13 @@ namespace Kts.ObjectSync.Common
 {
 	public interface ITransport
 	{
-		Task Send(string fullName, object value);
+		void Send(string fullName, object value);
 		event Action<string, object> Receive;
 	}
 
 	public sealed class Package
 	{
-		public IReadOnlyList<KeyValuePair<string, object>> Data { get; set; }
+		public string Name { get; set; }
+		public object Data { get; set; }
 	}
 }

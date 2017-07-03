@@ -57,7 +57,7 @@ namespace Kts.ObjectSync.Common
 			}
 		}
 
-		private async void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
+		private void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
 	    {
 			// this means that one of the properties on our child changed
 			// that means we should ship the result and update our children nodes
@@ -77,7 +77,7 @@ namespace Kts.ObjectSync.Common
 				_children[e.PropertyName] = new PropertyNode(_transport, fullName, value);
 			}
 			
-			 await _transport.Send(fullName, value);
+			 _transport.Send(fullName, value);
 			
 			// that line doesn't work unless we're on a leaf node? 
 			// no; we can serialize and send the whole thing

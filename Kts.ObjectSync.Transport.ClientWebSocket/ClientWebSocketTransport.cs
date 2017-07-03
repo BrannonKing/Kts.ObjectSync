@@ -5,6 +5,7 @@ using System.Threading;
 using System.Net.WebSockets;
 using CommonSerializer;
 using Microsoft.IO;
+using Kts.ActorsLite;
 
 namespace Kts.ObjectSync.Transport.ClientWebSocket
 {
@@ -13,11 +14,60 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 		private readonly System.Net.WebSockets.ClientWebSocket _socket;
 		private readonly ICommonSerializer _serializer;
 		private readonly CancellationTokenSource _exitSource = new CancellationTokenSource();
+		private readonly IActor<RecyclableMemoryStream> _actor;
 
 		public ClientWebSocketTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
 			_socket = new System.Net.WebSockets.ClientWebSocket();
+			var periodMs = (int)Math.Round(TimeSpan.FromSeconds(aggregationDelay).TotalMilliseconds);
+			var mainBuffer = _mgr.GetStream("MainClientBuffer");
+			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
+			SetAction<RecyclableMemoryStream> action = async (stream, token, isFirst, isLast) =>
+			{
+				// if we're the first in a set but our buffer isn't empty, send it (should't happen with these actors)
+				// if we're the first in a set make a new buffer
+				// copy our current stream in to the buffer
+				// if we're the last in the set ship the buffer
+				// the far end needs to keep pulling packages out of the buffer as long as there are more bytes
+
+				// how can we do this without two copies?
+				// we can push the same stream in every time (make a new stream if we can't get the lock on the previous)
+				// maybe we need a "unique value" actor
+
+				try
+				{
+					ArraySegment<byte> buffer;
+					if (isFirst && isLast && mainBuffer.Position == 0 && stream.TryGetBuffer(out buffer))
+					{
+						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
+						return;
+					}
+
+					if (isFirst && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					{
+						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
+						mainBuffer.Position = 0;
+					}
+
+					stream.CopyTo(mainBuffer);
+
+					if (isLast && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					{
+						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
+						mainBuffer.Position = 0;
+					}
+				}
+				catch (TaskCanceledException)
+				{
+					return;
+				}
+				finally
+				{
+					stream.Dispose();
+				}
+			};
+			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream>)new PeriodicAsyncActor<RecyclableMemoryStream>(action, periodMs) : new OrderedSyncActor<RecyclableMemoryStream>(action);
 			ConnectForever(serverAddress, reconnectDelay);
 		}
 
@@ -67,10 +117,12 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 						stream.Position = 0;
 
-						var package = _serializer.Deserialize<Package>(stream);
-						if (package.Data != null)
-							foreach(var kvp in package.Data)
-								Receive.Invoke(kvp.Key, kvp.Value);
+						while (stream.Position < stream.Length)
+						{
+							var package = _serializer.Deserialize<Package>(stream); // it may be more efficient to group them all into one large package and only call the deserializer once
+							if (package.Name != null)
+								Receive.Invoke(package.Name, package.Data);
+						}
 					}
 				}
 			}
@@ -81,18 +133,16 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 
-		public async Task Send(string fullName, object value)
+		public void Send(string fullName, object value)
 		{
-			// TODO: this needs to go into one of our async task runners
+			// we have to serialize it during the call to make sure that we get the right value
+			// if we lock the one big stream, we can't have multiple simultaneous serializations
+			// if we make a bunch of small streams and copy them all then we can
+			// it's a performance trade-off for multiple simulatenous writers vs reducing the memcpy by one
 			var package = new Package { Name = fullName, Data = value };
-			using (var stream = _mgr.GetStream(fullName))
-			{
-				_serializer.Serialize(stream, package);
-				if (stream.TryGetBuffer(out var buffer))
-					await _socket.SendAsync(buffer,
-						_serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary,
-						true, _exitSource.Token);
-			}
+			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullName);
+			_serializer.Serialize(stream, package);
+			_actor.Push(stream);
 		}
 
 		public void Dispose()
