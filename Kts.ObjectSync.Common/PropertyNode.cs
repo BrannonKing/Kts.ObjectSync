@@ -1,35 +1,38 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Reflection;
 
 namespace Kts.ObjectSync.Common
 {
 	class PropertyNode: IDisposable
     {
-	    private readonly object _obj;
+	    private readonly object _value;
 		private readonly FastMember.TypeAccessor _accessor;
 		private readonly string _name;
 		private readonly ITransport _transport;
 
 	    private readonly Dictionary<string, PropertyNode> _children = new Dictionary<string, PropertyNode>();
+	    public readonly Type PropertyType;
 
-	    public PropertyNode(ITransport transport, string name, object obj)
+	    public PropertyNode(ITransport transport, string name, object value, Type propertyType)
 	    {
-		    _obj = obj; // we don't change ourself; only our parent can do that
+		    _value = value; // we don't change ourself; only our parent can do that
+		    PropertyType = propertyType;
 			// loop through all the properties and create children
 			_name = name + ".";
 			_transport = transport;
-		    if (obj != null)
+		    if (value != null)
 		    {
-				var type = obj.GetType();
+				var type = value.GetType();
 			    if (!FastMember.TypeHelpers._IsValueType(type) && type != typeof(string))
 			    {
 					_accessor = FastMember.TypeAccessor.Create(type);
 				    foreach (var member in _accessor.GetMembers())
 				    {
-					    _children.Add(member.Name, new PropertyNode(_transport, _name + member.Name, _accessor[obj, member.Name]));
+					    _children.Add(member.Name, new PropertyNode(_transport, _name + member.Name, _accessor[value, member.Name], member.Type));
 				    }
-				    if (obj is INotifyPropertyChanged npc)
+				    if (value is INotifyPropertyChanged npc)
 					    npc.PropertyChanged += OnPropertyChanged;
 					_transport.Receive += OnReceivedValue;
 				}
@@ -38,7 +41,7 @@ namespace Kts.ObjectSync.Common
 
 		public void Dispose()
 		{
-			if (_obj is INotifyPropertyChanged npc)
+			if (_value is INotifyPropertyChanged npc)
 				npc.PropertyChanged -= OnPropertyChanged;
 			_transport.Receive -= OnReceivedValue;
 			lock(_children)
@@ -48,12 +51,25 @@ namespace Kts.ObjectSync.Common
 
 		private void OnReceivedValue(string name, object value)
 		{
-			var fullName = _name + name;
+			if (!name.StartsWith(_name))
+				return; // TODO: optimize this
+
+			var childName = name.Substring(_name.Length);
+			if (childName.Contains("."))
+				return;
+
 			lock (_children)
 			{
-				_children[name].Dispose();
-				_accessor[_obj, name] = value; // definitely dangerous to have this in the lock
-				_children[name] = new PropertyNode(_transport, fullName, value);
+				if (_children.TryGetValue(childName, out var node))
+				{
+					node.Dispose();
+					if (node.PropertyType.IsInstanceOfType(value))
+						_accessor[_value, childName] = value;
+					else
+						_accessor[_value, childName] = Convert.ChangeType(value, node.PropertyType);
+
+					_children[childName] = new PropertyNode(_transport, name, value, node.PropertyType);
+				}
 			}
 		}
 
@@ -72,9 +88,11 @@ namespace Kts.ObjectSync.Common
 			object value;
 			lock (_children)
 			{
-				value = _accessor[_obj, e.PropertyName]; // not sure this needs to be in the lock
-				_children[e.PropertyName].Dispose();
-				_children[e.PropertyName] = new PropertyNode(_transport, fullName, value);
+				value = _accessor[_value, e.PropertyName]; // not sure this needs to be in the lock
+				if (_children.TryGetValue(e.PropertyName, out var node))
+					node.Dispose();
+				_children[e.PropertyName] = new PropertyNode(_transport, fullName, value, 
+					node != null ? node.PropertyType : _accessor.GetMembers()[e.PropertyName].Type);
 			}
 			
 			 _transport.Send(fullName, value);

@@ -11,19 +11,20 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 {
 	public class ClientWebSocketTransport : ITransport, IDisposable
 	{
-		private readonly System.Net.WebSockets.ClientWebSocket _socket;
-		private readonly ICommonSerializer _serializer;
-		private readonly CancellationTokenSource _exitSource = new CancellationTokenSource();
-		private readonly IActor<RecyclableMemoryStream> _actor;
+		protected System.Net.WebSockets.ClientWebSocket _socket;
+		protected readonly ICommonSerializer _serializer;
+		protected readonly CancellationTokenSource _exitSource = new CancellationTokenSource();
+		protected TaskCompletionSource<bool> _connectionCompletionSource = new TaskCompletionSource<bool>();
+		protected readonly IActor<RecyclableMemoryStream, Task> _actor;
 
 		public ClientWebSocketTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
-			_socket = new System.Net.WebSockets.ClientWebSocket();
 			var periodMs = (int)Math.Round(TimeSpan.FromSeconds(aggregationDelay).TotalMilliseconds);
-			var mainBuffer = _mgr.GetStream("MainClientBuffer");
+			var mainBuffer = (RecyclableMemoryStream)_mgr.GetStream("_MainClientBuffer");
 			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
-			SetAction<RecyclableMemoryStream> action = async (stream, token, isFirst, isLast) =>
+
+			async Task setFunc(RecyclableMemoryStream stream, CancellationToken token, bool isFirst, bool isLast)
 			{
 				// if we're the first in a set but our buffer isn't empty, send it (should't happen with these actors)
 				// if we're the first in a set make a new buffer
@@ -37,39 +38,43 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 				try
 				{
-					ArraySegment<byte> buffer;
-					if (isFirst && isLast && mainBuffer.Position == 0 && stream.TryGetBuffer(out buffer))
+					if (isFirst && isLast && mainBuffer.Position == 0)
 					{
+						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
 						return;
 					}
 
-					if (isFirst && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					if (isFirst && mainBuffer.Length > 0)
 					{
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
 						mainBuffer.Position = 0;
 					}
 
 					stream.CopyTo(mainBuffer);
 
-					if (isLast && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					if (isLast && mainBuffer.Length > 0)
 					{
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
 						mainBuffer.Position = 0;
 					}
 				}
 				catch (TaskCanceledException)
 				{
-					return;
 				}
 				finally
 				{
 					stream.Dispose();
 				}
-			};
-			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream>)new PeriodicAsyncActor<RecyclableMemoryStream>(action, periodMs) : new OrderedSyncActor<RecyclableMemoryStream>(action);
+			}
+
+			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream, Task>)new PeriodicAsyncActor<RecyclableMemoryStream, Task>(setFunc, periodMs) : new OrderedAsyncActor<RecyclableMemoryStream, Task>(setFunc);
 			ConnectForever(serverAddress, reconnectDelay);
 		}
+
+		public Task HasConnected => _connectionCompletionSource.Task;
 
 		private async void ConnectForever(Uri serverAddress, double reconnectDelay)
 		{
@@ -77,17 +82,40 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 			{
 				try
 				{
-					await _socket.ConnectAsync(serverAddress, _exitSource.Token);
-					if (_socket.State == WebSocketState.Open)
-						await ReceiveForever();
+					_socket?.Dispose();
+					try
+					{
+						_socket = new System.Net.WebSockets.ClientWebSocket();
+						await _socket.ConnectAsync(serverAddress, _exitSource.Token);
+					}
+					catch (WebSocketException)
+					{
+						// relying on state handling instead
+					}
+					if (_socket?.State == WebSocketState.Open)
+					{
+						_connectionCompletionSource.SetResult(true);
+						try
+						{
+							await ReceiveForever();
+						}
+						finally
+						{
+							_connectionCompletionSource = new TaskCompletionSource<bool>();
+						}
+					}
 					if (_exitSource.IsCancellationRequested)
 						break;
 					if (reconnectDelay > 0.0)
 						await Task.Delay(TimeSpan.FromSeconds(reconnectDelay), _exitSource.Token);
 				}
-				catch (TaskCanceledException) { }
+				catch (TaskCanceledException)
+				{
+					if (_exitSource.IsCancellationRequested)
+						break;
+				}
 			}
-			_socket.Dispose();
+			_socket?.Dispose();
 		}
 
 		private async Task ReceiveForever()

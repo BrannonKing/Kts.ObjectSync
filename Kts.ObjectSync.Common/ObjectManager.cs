@@ -22,7 +22,7 @@ namespace Kts.ObjectSync.Common
 		    if (objectForSynchronization == null)
 			    throw new ArgumentNullException(nameof(objectForSynchronization));
 
-		    var rootNode = new PropertyNode(_transport, objectForSynchronization.ID, objectForSynchronization);
+		    var rootNode = new PropertyNode(_transport, objectForSynchronization.ID, objectForSynchronization, typeof(object));
 		    if (!_nodeCache.TryAdd(objectForSynchronization.ID, rootNode))
 			    throw new ArgumentException($"Object {objectForSynchronization.ID} added twice. Make sure IDs differ between objects.");
 	    }

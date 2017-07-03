@@ -13,64 +13,66 @@ using Kts.ActorsLite;
 namespace Kts.ObjectSync.Transport.AspNetCore
 {
 	// some ideas taken from: https://radu-matei.github.io/blog/aspnet-core-websockets-middleware/	
-	public class ServerMiddlewareTransport : ITransport
+	public class ServerWebSocketTransport : ITransport
 	{
 		private readonly ICommonSerializer _serializer;
 		public event Action<string, object> Receive;
-		private readonly IActor<RecyclableMemoryStream> _actor;
+		private readonly IActor<RecyclableMemoryStream, Task> _actor;
 		private readonly List<WebSocket> _sockets = new List<WebSocket>();
 
-		public ServerMiddlewareTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
+		public ServerWebSocketTransport(ICommonSerializer serializer, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
 			var periodMs = (int)Math.Round(TimeSpan.FromSeconds(aggregationDelay).TotalMilliseconds);
-			var mainBuffer = _mgr.GetStream("MainClientBuffer");
+			var mainBuffer = (RecyclableMemoryStream)_mgr.GetStream("_MainServerBuffer");
 			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
-			SetAction<RecyclableMemoryStream> action = async (stream, token, isFirst, isLast) =>
+			async Task setFunc(RecyclableMemoryStream stream, CancellationToken token, bool isFirst, bool isLast)
 			{
-			// if we're the first in a set but our buffer isn't empty, send it (should't happen with these actors)
-			// if we're the first in a set make a new buffer
-			// copy our current stream in to the buffer
-			// if we're the last in the set ship the buffer
-			// the far end needs to keep pulling packages out of the buffer as long as there are more bytes
+				// if we're the first in a set but our buffer isn't empty, send it (should't happen with these actors)
+				// if we're the first in a set make a new buffer
+				// copy our current stream in to the buffer
+				// if we're the last in the set ship the buffer
+				// the far end needs to keep pulling packages out of the buffer as long as there are more bytes
 
-			// how can we do this without two copies?
-			// we can push the same stream in every time (make a new stream if we can't get the lock on the previous)
-			// maybe we need a "unique value" actor
+				// how can we do this without two copies?
+				// we can push the same stream in every time (make a new stream if we can't get the lock on the previous)
+				// maybe we need a "unique value" actor
 
-			try
+				try
 				{
-					ArraySegment<byte> buffer;
-					if (isFirst && isLast && mainBuffer.Position == 0 && stream.TryGetBuffer(out buffer))
+					if (isFirst && isLast && mainBuffer.Position == 0)
 					{
+						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int) stream.Length);
 						await SendAsync(buffer, msgType);
 						return;
 					}
 
-					if (isFirst && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					if (isFirst && mainBuffer.Length > 0)
 					{
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await SendAsync(buffer, msgType);
 						mainBuffer.Position = 0;
 					}
 
 					stream.CopyTo(mainBuffer);
 
-					if (isLast && mainBuffer.Position > 0 && mainBuffer.TryGetBuffer(out buffer))
+					if (isLast && mainBuffer.Length > 0)
 					{
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await SendAsync(buffer, msgType);
 						mainBuffer.Position = 0;
 					}
 				}
 				catch (TaskCanceledException)
 				{
-					return;
 				}
 				finally
 				{
 					stream.Dispose();
 				}
-			};
-			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream>)new PeriodicAsyncActor<RecyclableMemoryStream>(action, periodMs) : new OrderedSyncActor<RecyclableMemoryStream>(action);
+			}
+
+			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream, Task>)new PeriodicAsyncActor<RecyclableMemoryStream, Task>(setFunc, periodMs) : new OrderedAsyncActor<RecyclableMemoryStream, Task>(setFunc);
 		}
 
 		private async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType msgType)
@@ -100,9 +102,9 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 		public class InnerServerMiddlewareTransport
 		{
 			private readonly RequestDelegate _next;
-			private readonly ServerMiddlewareTransport _parent;
+			private readonly ServerWebSocketTransport _parent;
 
-			public InnerServerMiddlewareTransport(RequestDelegate next, ServerMiddlewareTransport parent)
+			public InnerServerMiddlewareTransport(RequestDelegate next, ServerWebSocketTransport parent)
 			{
 				_next = next;
 				_parent = parent;

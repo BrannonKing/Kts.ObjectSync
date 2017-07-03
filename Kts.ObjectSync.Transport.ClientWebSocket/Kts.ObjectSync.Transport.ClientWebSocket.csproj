@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="CommonSerializer" Version="1.1.1" />
-    <PackageReference Include="Kts.ActorsLite" Version="1.0.2" />
+    <PackageReference Include="Kts.ActorsLite" Version="1.0.3" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="1.2.2" />
     <PackageReference Include="System.Net.WebSockets.Client" Version="4.3.1" />
   </ItemGroup>

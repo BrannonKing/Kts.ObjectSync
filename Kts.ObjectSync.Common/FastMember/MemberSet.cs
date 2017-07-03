@@ -29,6 +29,9 @@ namespace FastMember
 		/// </summary>
 		public Member this[int index] => members[index];
 
+		public Member this[string name] => members.FirstOrDefault(m => m.Name == name);
+
+
 		/// <summary>
 		/// The number of members defined for this type
 		/// </summary>
