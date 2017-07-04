@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Dynamic;
+using System.Linq;
+using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using CommonSerializer.Newtonsoft.Json;
@@ -9,7 +13,6 @@ using Kts.ObjectSync.Transport.ClientWebSocket;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Kts.ObjectSync.Tests
@@ -124,6 +127,112 @@ namespace Kts.ObjectSync.Tests
 					OnPropertyChanged();
 				}
 			}
+		}
+
+
+		[Fact]
+		public void TestExpandoProps()
+		{
+			IDictionary<string, object> obj = new ExpandoObject();
+			obj["A"] = "a";
+			obj["B"] = 3;
+
+			var accessor = FastMember.TypeAccessor.Create(obj.GetType());
+			var members = ((IDynamicMetaObjectProvider)obj).GetMetaObject(Expression.Constant(obj)).GetDynamicMemberNames().ToList();
+			Assert.Equal(2, members.Count);
+			Assert.NotNull(members.Single(m => m == "A"));
+			Assert.Equal("a", accessor[obj, "A"]);
+			Assert.Equal(3, accessor[obj, "B"]);
+			Assert.NotNull(members.Single(m => m == "B"));
+		}
+
+		public class Speedy : DynamicObject, INotifyPropertyChanged
+		{
+			public override IEnumerable<string> GetDynamicMemberNames()
+			{
+				for (int i = 0; i < 200; i++)
+					yield return "Prop" + i;
+			}
+
+			private readonly int[] _props = new int[200];
+
+			public override bool TryGetMember(GetMemberBinder binder, out object result)
+			{
+				result = 0;
+				if (!binder.Name.StartsWith("Prop")) return false;
+				if (!int.TryParse(binder.Name.Substring(4), out var idx) || idx < 0 || idx >= 200) return false;
+				result = _props[idx];
+				return true;
+			}
+
+			public override bool TrySetMember(SetMemberBinder binder, object value)
+			{
+				if (!binder.Name.StartsWith("Prop")) return false;
+				if (!int.TryParse(binder.Name.Substring(4), out var idx) || idx < 0 || idx >= 200) return false;
+				var oldVal = _props[idx];
+				if (oldVal != (int) value)
+				{
+					_props[idx] = (int) value;
+					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(binder.Name));
+				}
+				return true;
+			}
+
+			public event PropertyChangedEventHandler PropertyChanged;
+		}
+
+
+		[Fact]
+		public async Task SpeedTest()
+		{
+			var serializer = new JsonCommonSerializer();
+			var serverObj = new Speedy();
+			var serverTransport = new ServerWebSocketTransport(serializer, 0.1); // never throws
+			var serverMgr = new ObjectManager(serverTransport); // never throws
+			serverMgr.Add("speedy", serverObj); // never throws
+			Console.WriteLine("Starting server...");
+			await Startup.StartServer(serverTransport); // should throw if it can't start
+
+			Console.WriteLine("Starting client...");
+			var clientTransport = new ClientWebSocketTransport(serializer, new Uri("ws://localhost:15050/ObjSync"), aggregationDelay: 0.1);
+			var clientMgr = new ObjectManager(clientTransport);
+			await clientTransport.HasConnected;
+
+			var clientObj = new Speedy();
+			clientMgr.Add("speedy", clientObj);
+
+			var lastClientVal = -1;
+			var lastServerVal = -1;
+			var shouldRun = true;
+			var t1 = Task.Run(() =>
+			{
+				var accessor = FastMember.ObjectAccessor.Create(clientObj);
+				int j = 0;
+				while (shouldRun)
+				{
+					var idx = j % 100;
+					j++;
+					lastClientVal = (int) accessor["Prop" + idx] + 1;
+					accessor["Prop" + idx] = lastClientVal;
+				}
+			});
+			var t2 = Task.Run(() =>
+			{
+				var accessor = FastMember.ObjectAccessor.Create(serverObj);
+				int j = 0;
+				while (shouldRun)
+				{
+					var idx = (j % 100) + 100;
+					j++;
+					lastServerVal = (int)accessor["Prop" + idx] + 1;
+					accessor["Prop" + idx] = lastServerVal;
+				}
+			});
+			await Task.Delay(8000);
+			shouldRun = false;
+			await t1;
+			await t2;
+
 		}
 	}
 }

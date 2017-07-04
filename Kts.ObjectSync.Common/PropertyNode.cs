@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Dynamic;
+using System.Linq.Expressions;
 using System.Reflection;
 
 namespace Kts.ObjectSync.Common
@@ -41,14 +43,30 @@ namespace Kts.ObjectSync.Common
 			    if (!FastMember.TypeHelpers._IsValueType(type) && type != typeof(string))
 			    {
 					_accessor = FastMember.TypeAccessor.Create(type);
-				    foreach (var member in _accessor.GetMembers())
+				    if (_accessor.GetMembersSupported)
 				    {
-					    var childValue = _accessor[value, member.Name];
-						if (childValue is ObjectForSynchronization ofs)
-							_children.Add(member.Name, new PropertyNode(_transport, ofs));
-						else
-							_children.Add(member.Name, new PropertyNode(_transport, _name + member.Name, 
-								childValue, member.Type, _shouldSend, _shouldReceive, null));
+					    foreach (var member in _accessor.GetMembers())
+					    {
+						    var childValue = _accessor[value, member.Name];
+						    if (childValue is ObjectForSynchronization ofs)
+							    _children.Add(member.Name, new PropertyNode(_transport, ofs));
+						    else
+							    _children.Add(member.Name, new PropertyNode(_transport, _name + member.Name,
+								    childValue, member.Type, _shouldSend, _shouldReceive, null));
+					    }
+				    }
+				    else if (value is IDynamicMetaObjectProvider dmop)
+				    {
+					    var names = dmop.GetMetaObject(Expression.Constant(value)).GetDynamicMemberNames();
+					    foreach (var childName in names)
+					    {
+						    var childValue = _accessor[value, childName];
+						    if (childValue is ObjectForSynchronization ofs)
+							    _children.Add(childName, new PropertyNode(_transport, ofs));
+						    else
+							    _children.Add(childName, new PropertyNode(_transport, _name + childName,
+								    childValue, childValue?.GetType(), _shouldSend, _shouldReceive, null));
+					    }
 				    }
 				    if (value is INotifyPropertyChanged npc)
 					    npc.PropertyChanged += OnPropertyChanged;

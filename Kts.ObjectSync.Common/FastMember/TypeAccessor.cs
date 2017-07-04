@@ -82,6 +82,11 @@ namespace FastMember
                 get => CallSiteCache.GetValue(name, target);
 	            set => CallSiteCache.SetValue(name, target, value);
             }
+
+	        public override MemberSet GetMembers()
+	        {
+		        return base.GetMembers();
+	        }
         }
 #endif
 

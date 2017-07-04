@@ -49,7 +49,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 					{
 						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
-						mainBuffer.Position = 0;
+						mainBuffer.SetLength(0);
 					}
 
 					stream.CopyTo(mainBuffer);
@@ -58,7 +58,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 					{
 						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
-						mainBuffer.Position = 0;
+						mainBuffer.SetLength(0);
 					}
 				}
 				catch (TaskCanceledException)
@@ -148,7 +148,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 						while (stream.Position < stream.Length)
 						{
 							var package = _serializer.Deserialize<Package>(stream); // it may be more efficient to group them all into one large package and only call the deserializer once
-							if (package.Name != null)
+							if (package?.Name != null)
 								Receive.Invoke(package.Name, package.Data);
 						}
 					}

@@ -52,7 +52,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 					{
 						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await SendAsync(buffer, msgType);
-						mainBuffer.Position = 0;
+						mainBuffer.SetLength(0);
 					}
 
 					stream.CopyTo(mainBuffer);
@@ -61,7 +61,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 					{
 						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await SendAsync(buffer, msgType);
-						mainBuffer.Position = 0;
+						mainBuffer.SetLength(0);
 					}
 				}
 				catch (TaskCanceledException)
