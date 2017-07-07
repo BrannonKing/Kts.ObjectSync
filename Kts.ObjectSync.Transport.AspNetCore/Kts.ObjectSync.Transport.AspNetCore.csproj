@@ -6,13 +6,18 @@
 
   <ItemGroup>
     <PackageReference Include="CommonSerializer" Version="1.1.1" />
-    <PackageReference Include="Kts.ActorsLite" Version="1.0.3" />
     <PackageReference Include="Microsoft.AspNetCore" Version="1.1.2" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="1.2.2" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Kts.ObjectSync.Common\Kts.ObjectSync.Common.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Kts.ActorsLite">
+      <HintPath>..\..\Kts.ActorsLite\Kts.ActorsLite\bin\Debug\netstandard1.3\Kts.ActorsLite.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>

@@ -24,7 +24,6 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 		public ServerWebSocketTransport(ICommonSerializer serializer, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
-			var periodMs = (int)Math.Round(TimeSpan.FromSeconds(aggregationDelay).TotalMilliseconds);
 			var mainBuffer = (RecyclableMemoryStream)_mgr.GetStream("_MainServerBuffer");
 			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
 			async Task setFunc(RecyclableMemoryStream stream, CancellationToken token, bool isFirst, bool isLast)
@@ -39,20 +38,22 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				// we can push the same stream in every time (make a new stream if we can't get the lock on the previous)
 				// maybe we need a "unique value" actor
 
+				isLast |= stream.Length == 0; // for flush
+
 				try
 				{
-					if (isFirst && isLast && mainBuffer.Position == 0)
-					{
-						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int) stream.Length);
-						await SendAsync(buffer, msgType);
-						return;
-					}
-
 					if (isFirst && mainBuffer.Length > 0)
 					{
 						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
 						await SendAsync(buffer, msgType);
 						mainBuffer.SetLength(0);
+					}
+
+					if (isFirst && isLast && mainBuffer.Length == 0)
+					{
+						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
+						await SendAsync(buffer, msgType);
+						return;
 					}
 
 					stream.CopyTo(mainBuffer);
@@ -73,7 +74,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				}
 			}
 
-			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream, Task>)new PeriodicAsyncActor<RecyclableMemoryStream, Task>(setFunc, periodMs) : new OrderedAsyncActor<RecyclableMemoryStream, Task>(setFunc);
+			_actor = aggregationDelay > 0.0 ? (IActor<RecyclableMemoryStream, Task>)new PeriodicAsyncActor<RecyclableMemoryStream, Task>(setFunc, TimeSpan.FromSeconds(aggregationDelay)) : new OrderedAsyncActor<RecyclableMemoryStream, Task>(setFunc);
 		}
 
 		private async Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType msgType)
@@ -92,12 +93,20 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 
-		public void Send(string fullName, object value)
+		public async Task Send(string fullName, object value)
 		{
 			var package = new Package { Name = fullName, Data = value };
 			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullName);
 			_serializer.Serialize(stream, package);
-			_actor.Push(stream);
+			var result = await _actor.Push(stream).ConfigureAwait(false);
+			await result.ConfigureAwait(false);
+
+		}
+
+		public async Task Flush()
+		{
+			var result = await _actor.Push((RecyclableMemoryStream)_mgr.GetStream("_Flush"));
+			await result;
 		}
 
 		private class OneTimeTransport : ITransport
@@ -111,7 +120,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				_serializer = serializer;
 			}
 
-			public async void Send(string fullName, object value)
+			public async Task Send(string fullName, object value)
 			{
 				var package = new Package { Name = fullName, Data = value };
 				using (var stream = (RecyclableMemoryStream) _mgr.GetStream(fullName))
@@ -121,6 +130,11 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 					var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
 					await _socket.SendAsync(buffer, msgType, true, CancellationToken.None);
 				}
+			}
+
+			public void Flush()
+			{
+				throw new NotSupportedException();
 			}
 
 			public event Action<string, object> Receive = delegate { };
@@ -151,14 +165,14 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				lock (_parent._sockets)
 					_parent._sockets.Add(socket);
 				_parent.Connected.Invoke(new OneTimeTransport(socket, _parent._serializer));
-				await ReceiveForever(socket);
+				await ReceiveForever(socket).ConfigureAwait(false);
 				lock (_parent._sockets)
 					_parent._sockets.Remove(socket);
 			}
 
 			private async Task ReceiveForever(WebSocket socket)
 			{
-				ArraySegment<Byte> buffer = new ArraySegment<byte>(new Byte[8192]);
+				var array = new Byte[8192];
 
 				try
 				{
@@ -166,10 +180,11 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 					{
 						while (socket.State == WebSocketState.Open)
 						{
-							stream.Position = 0;
+							stream.SetLength(0);
 							WebSocketReceiveResult result;
 							do
 							{
+								var buffer = new ArraySegment<byte>(array);
 								result = await socket.ReceiveAsync(buffer, CancellationToken.None);
 								if (result.CloseStatus != null)
 								{
@@ -180,9 +195,11 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 							} while (!result.EndOfMessage);
 
 							stream.Position = 0;
-
-							var package = _parent._serializer.Deserialize<Package>(stream);
-							_parent.Receive.Invoke(package.Name, package.Data);
+							while (stream.Position < stream.Length)
+							{
+								var package = _parent._serializer.Deserialize<Package>(stream);
+								_parent.Receive.Invoke(package.Name, package.Data);
+							}
 						}
 					}
 				}

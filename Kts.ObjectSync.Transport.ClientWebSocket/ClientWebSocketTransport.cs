@@ -20,7 +20,6 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 		public ClientWebSocketTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
-			var periodMs = (int)Math.Round(TimeSpan.FromSeconds(aggregationDelay).TotalMilliseconds);
 			var mainBuffer = (RecyclableMemoryStream)_mgr.GetStream("_MainClientBuffer");
 			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
 
@@ -36,27 +35,29 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 				// we can push the same stream in every time (make a new stream if we can't get the lock on the previous)
 				// maybe we need a "unique value" actor
 
+				isLast |= stream.Length == 0; // for flush
+
 				try
 				{
-					if (isFirst && isLast && mainBuffer.Position == 0)
+					if (isFirst && mainBuffer.Length > 0)
+					{
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int) mainBuffer.Length);
+						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
+						mainBuffer.SetLength(0);
+					}
+
+					if (isFirst && isLast && mainBuffer.Length == 0)
 					{
 						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
 						return;
 					}
 
-					if (isFirst && mainBuffer.Length > 0)
-					{
-						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
-						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
-						mainBuffer.SetLength(0);
-					}
-
 					stream.CopyTo(mainBuffer);
 
 					if (isLast && mainBuffer.Length > 0)
 					{
-						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int) mainBuffer.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
 						mainBuffer.SetLength(0);
 					}
@@ -70,7 +71,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 				}
 			}
 
-			_actor = periodMs > 0 ? (IActor<RecyclableMemoryStream, Task>)new PeriodicAsyncActor<RecyclableMemoryStream, Task>(setFunc, periodMs) : new OrderedAsyncActor<RecyclableMemoryStream, Task>(setFunc);
+			_actor = aggregationDelay > 0.0 ? (IActor<RecyclableMemoryStream, Task>)new PeriodicAsyncActor<RecyclableMemoryStream, Task>(setFunc, TimeSpan.FromSeconds(aggregationDelay)) : new OrderedAsyncActor<RecyclableMemoryStream, Task>(setFunc);
 			ConnectForever(serverAddress, reconnectDelay);
 		}
 
@@ -120,7 +121,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 		private async Task ReceiveForever()
 		{
-			ArraySegment<Byte> buffer = new ArraySegment<byte>(new Byte[8192]);
+			var array = new Byte[8192];
 
 			try
 			{
@@ -128,10 +129,11 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 				{
 					while (_socket.State == WebSocketState.Open)
 					{
-						stream.Position = 0;
+						stream.SetLength(0);
 						WebSocketReceiveResult result;
 						do
 						{
+							var buffer = new ArraySegment<byte>(array);
 							result = await _socket.ReceiveAsync(buffer, _exitSource.Token);
 							if (_exitSource.IsCancellationRequested)
 								return;
@@ -157,6 +159,12 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 			catch (TaskCanceledException) { }
 		}
 
+		public async Task Flush()
+		{
+			var result = await _actor.Push((RecyclableMemoryStream) _mgr.GetStream("_Flush")).ConfigureAwait(false);
+			await result.ConfigureAwait(false);
+		}
+
 		public event Action<string, object> Receive = delegate { };
 		private Action<ITransport> _connected;
 		public event Action<ITransport> Connected
@@ -171,7 +179,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 
-		public void Send(string fullName, object value)
+		public async Task Send(string fullName, object value)
 		{
 			// we have to serialize it during the call to make sure that we get the right value
 			// if we lock the one big stream, we can't have multiple simultaneous serializations
@@ -180,7 +188,8 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 			var package = new Package { Name = fullName, Data = value };
 			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullName);
 			_serializer.Serialize(stream, package);
-			_actor.Push(stream);
+			var result = await _actor.Push(stream).ConfigureAwait(false);
+			await result.ConfigureAwait(false);
 		}
 
 		public void Dispose()

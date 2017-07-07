@@ -1,12 +1,11 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Kts.ObjectSync.Common
 {
 	public interface ITransport
 	{
-		void Send(string fullName, object value);
+		Task Send(string fullName, object value);
 		event Action<string, object> Receive;
 		event Action<ITransport> Connected;
 	}

@@ -166,7 +166,7 @@ namespace Kts.ObjectSync.Common
 
 			if (_shouldSend != null && !_shouldSend.Invoke(fullName))
 			    return;
-			 _transport.Send(fullName, value);
+			 _transport.Send(fullName, value).Wait();
 			
 			// that line doesn't work unless we're on a leaf node? 
 			// no; we can serialize and send the whole thing

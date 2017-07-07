@@ -172,6 +172,9 @@ namespace Kts.ObjectSync.Tests
 				var oldVal = _props[idx];
 				if (oldVal != (int) value)
 				{
+					if (oldVal > (int) value)
+						return true;
+						//throw new InvalidOperationException("Out of order");
 					_props[idx] = (int) value;
 					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(binder.Name));
 				}
@@ -187,14 +190,14 @@ namespace Kts.ObjectSync.Tests
 		{
 			var serializer = new JsonCommonSerializer();
 			var serverObj = new Speedy();
-			var serverTransport = new ServerWebSocketTransport(serializer, 0.1); // never throws
+			var serverTransport = new ServerWebSocketTransport(serializer, 0.0); // never throws
 			var serverMgr = new ObjectManager(serverTransport); // never throws
 			serverMgr.Add("speedy", serverObj); // never throws
 			Console.WriteLine("Starting server...");
 			await Startup.StartServer(serverTransport); // should throw if it can't start
 
 			Console.WriteLine("Starting client...");
-			var clientTransport = new ClientWebSocketTransport(serializer, new Uri("ws://localhost:15050/ObjSync"), aggregationDelay: 0.1);
+			var clientTransport = new ClientWebSocketTransport(serializer, new Uri("ws://localhost:15050/ObjSync"), aggregationDelay: 0.0);
 			var clientMgr = new ObjectManager(clientTransport);
 			await clientTransport.HasConnected;
 
@@ -215,6 +218,7 @@ namespace Kts.ObjectSync.Tests
 					lastClientVal = (int) accessor["Prop" + idx] + 1;
 					accessor["Prop" + idx] = lastClientVal;
 				}
+				clientTransport.Flush().ConfigureAwait(false).GetAwaiter().GetResult();
 			});
 			var t2 = Task.Run(() =>
 			{
@@ -227,6 +231,7 @@ namespace Kts.ObjectSync.Tests
 					lastServerVal = (int)accessor["Prop" + idx] + 1;
 					accessor["Prop" + idx] = lastServerVal;
 				}
+				serverTransport.Flush().ConfigureAwait(false).GetAwaiter().GetResult();
 			});
 			await Task.Delay(8000);
 			shouldRun = false;
