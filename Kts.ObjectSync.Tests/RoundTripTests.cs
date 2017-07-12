@@ -10,6 +10,7 @@ using CommonSerializer.Newtonsoft.Json;
 using Kts.ObjectSync.Common;
 using Kts.ObjectSync.Transport.AspNetCore;
 using Kts.ObjectSync.Transport.ClientWebSocket;
+using Kts.ObjectSync.Transport.NATS;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -238,6 +239,64 @@ namespace Kts.ObjectSync.Tests
 			await t1;
 			await t2;
 
+		}
+
+		[Fact]
+		public async Task SpeedTestNats()
+		{
+			var serializer = new JsonCommonSerializer();
+			var serverObj = new Speedy();
+			var serverTransport = new NatsTransport(serializer); // never throws
+			var serverMgr = new ObjectManager(serverTransport); // never throws
+			serverMgr.Add("speedy", serverObj); // never throws
+			Console.WriteLine("Starting server...");
+
+			Console.WriteLine("Starting client...");
+			var clientTransport = new NatsTransport(serializer);
+			var clientMgr = new ObjectManager(clientTransport);
+
+			while (!serverTransport.IsConnected || !clientTransport.IsConnected)
+				await Task.Delay(5);
+
+			var clientObj = new Speedy();
+			clientMgr.Add("speedy", clientObj);
+
+			var lastClientVal = -1;
+			var lastServerVal = -1;
+			var shouldRun = true;
+			var t1 = Task.Run(() =>
+			{
+				var accessor = FastMember.ObjectAccessor.Create(clientObj);
+				int j = 0;
+				while (shouldRun)
+				{
+					var idx = j % 100;
+					j++;
+					lastClientVal = (int)accessor["Prop" + idx] + 1;
+					accessor["Prop" + idx] = lastClientVal;
+				}
+				clientTransport.Flush();
+			});
+			var t2 = Task.Run(() =>
+			{
+				var accessor = FastMember.ObjectAccessor.Create(serverObj);
+				int j = 0;
+				while (shouldRun)
+				{
+					var idx = (j % 100) + 100;
+					j++;
+					lastServerVal = (int)accessor["Prop" + idx] + 1;
+					accessor["Prop" + idx] = lastServerVal;
+				}
+				serverTransport.Flush();
+			});
+			await Task.Delay(8000);
+			shouldRun = false;
+			await t1;
+			await t2;
+
+			clientTransport.Dispose();
+			serverTransport.Dispose();
 		}
 	}
 }

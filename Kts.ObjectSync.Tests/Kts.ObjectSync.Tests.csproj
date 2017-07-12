@@ -25,6 +25,7 @@
     <ProjectReference Include="..\Kts.ObjectSync.Common\Kts.ObjectSync.Common.csproj" />
     <ProjectReference Include="..\Kts.ObjectSync.Transport.AspNetCore\Kts.ObjectSync.Transport.AspNetCore.csproj" />
     <ProjectReference Include="..\Kts.ObjectSync.Transport.ClientWebSocket\Kts.ObjectSync.Transport.ClientWebSocket.csproj" />
+    <ProjectReference Include="..\Kts.ObjectSync.Transport.NATS\Kts.ObjectSync.Transport.NATS.csproj" />
   </ItemGroup>
 
   <ItemGroup>
