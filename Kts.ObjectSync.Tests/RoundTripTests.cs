@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Dynamic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using CommonSerializer.Newtonsoft.Json;
 using Kts.ObjectSync.Common;
@@ -15,41 +17,49 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Kts.ObjectSync.Tests
 {
 	public class RoundTripTests
 	{
-		[Fact]
-		public async Task Test()
+		private readonly ITestOutputHelper _output;
+
+		public RoundTripTests(ITestOutputHelper output)
 		{
-			var serializer = new JsonCommonSerializer();
-			var serverObj = new Tester{P2 = 23, P3 = "abc"};
-			var serverTransport = new ServerWebSocketTransport(serializer); // never throws
-			var serverMgr = new ObjectManager(serverTransport); // never throws
-			serverMgr.Add("a", serverObj, true); // never throws
-			Console.WriteLine("Starting server...");
-			await Startup.StartServer(serverTransport); // should throw if it can't start
-
-			Console.WriteLine("Starting client...");
-			var clientTransport = new ClientWebSocketTransport(serializer, new Uri("ws://localhost:15050/ObjSync"));
-			var clientMgr = new ObjectManager(clientTransport);
-			await clientTransport.HasConnected;
-
-			var clientObj = new Tester();
-			clientMgr.Add("a", clientObj);
-
-			await Task.Delay(20);
-
-			Assert.Equal(0, clientObj.P2);
-			serverObj.P2 = 42;
-			await Task.Delay(20);
-			Assert.Equal(42, clientObj.P2);
-
-			// left off: wait for what?
-			// 1. We need the ability to send the whole object every time a connection is made.
-			// 2. We should bypass any type conversion for the primary JSON types
+			_output = output;
 		}
+
+		//[Fact]
+		//public async Task TestSendFirst()
+		//{
+		//	var serializer = new JsonCommonSerializer();
+		//	var serverObj = new Tester { P2 = 23, P3 = "abc" };
+		//	var serverTransport = new ServerWebSocketTransport(serializer); // never throws
+		//	var serverMgr = new ObjectManager(serverTransport); // never throws
+		//	serverMgr.Add("a", serverObj); // never throws
+		//	Console.WriteLine("Starting server...");
+		//	await Startup.StartServer(serverTransport); // should throw if it can't start
+
+		//	Console.WriteLine("Starting client...");
+		//	var clientTransport = new ClientWebSocketTransport(serializer, new Uri("ws://localhost:15050/ObjSync"));
+		//	var clientMgr = new ObjectManager(clientTransport);
+		//	await clientTransport.HasConnected;
+
+		//	var clientObj = new Tester();
+		//	clientMgr.Add("a", clientObj);
+
+		//	await Task.Delay(20);
+
+		//	Assert.Equal(0, clientObj.P2);
+		//	serverObj.P2 = 42;
+		//	await Task.Delay(20);
+		//	Assert.Equal(42, clientObj.P2);
+
+		//	// left off: wait for what?
+		//	// 1. We need the ability to send the whole object every time a connection is made.
+		//	// 2. We should bypass any type conversion for the primary JSON types
+		//}
 
 		public class Startup
 		{
@@ -155,14 +165,19 @@ namespace Kts.ObjectSync.Tests
 					yield return "Prop" + i;
 			}
 
-			private readonly int[] _props = new int[200];
+			public readonly int[] Props = new int[200];
+
+			public bool Contains(int x)
+			{
+				return Props.Contains(x);
+			}
 
 			public override bool TryGetMember(GetMemberBinder binder, out object result)
 			{
 				result = 0;
 				if (!binder.Name.StartsWith("Prop")) return false;
 				if (!int.TryParse(binder.Name.Substring(4), out var idx) || idx < 0 || idx >= 200) return false;
-				result = _props[idx];
+				result = Props[idx];
 				return true;
 			}
 
@@ -170,13 +185,13 @@ namespace Kts.ObjectSync.Tests
 			{
 				if (!binder.Name.StartsWith("Prop")) return false;
 				if (!int.TryParse(binder.Name.Substring(4), out var idx) || idx < 0 || idx >= 200) return false;
-				var oldVal = _props[idx];
+				var oldVal = Props[idx];
 				if (oldVal != (int) value)
 				{
 					if (oldVal > (int) value)
 						return true;
 						//throw new InvalidOperationException("Out of order");
-					_props[idx] = (int) value;
+					Props[idx] = (int) value;
 					PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(binder.Name));
 				}
 				return true;
@@ -187,7 +202,7 @@ namespace Kts.ObjectSync.Tests
 
 
 		[Fact]
-		public async Task SpeedTest()
+		public async Task SpeedTestAspNet()
 		{
 			var serializer = new JsonCommonSerializer();
 			var serverObj = new Speedy();
@@ -198,7 +213,8 @@ namespace Kts.ObjectSync.Tests
 			await Startup.StartServer(serverTransport); // should throw if it can't start
 
 			Console.WriteLine("Starting client...");
-			var clientTransport = new ClientWebSocketTransport(serializer, new Uri("ws://localhost:15050/ObjSync"), aggregationDelay: 0.0);
+			var clientTransport = new ClientWebSocketTransport(serializer, 
+				new Uri("ws://localhost:15050/ObjSync"), aggregationDelay: 0.0);
 			var clientMgr = new ObjectManager(clientTransport);
 			await clientTransport.HasConnected;
 
@@ -208,6 +224,7 @@ namespace Kts.ObjectSync.Tests
 			var lastClientVal = -1;
 			var lastServerVal = -1;
 			var shouldRun = true;
+			var swOuter = Stopwatch.StartNew();
 			var t1 = Task.Run(() =>
 			{
 				var accessor = FastMember.ObjectAccessor.Create(clientObj);
@@ -216,10 +233,13 @@ namespace Kts.ObjectSync.Tests
 				{
 					var idx = j % 100;
 					j++;
-					lastClientVal = (int) accessor["Prop" + idx] + 1;
+					lastClientVal = j;
 					accessor["Prop" + idx] = lastClientVal;
+					var sw = Stopwatch.StartNew();
+					SpinWait.SpinUntil(() => sw.Elapsed.TotalMilliseconds > 0.02);
 				}
-				clientTransport.Flush().ConfigureAwait(false).GetAwaiter().GetResult();
+				clientTransport.Flush().Wait();
+				SpinWait.SpinUntil(() => clientObj.Contains(lastServerVal));
 			});
 			var t2 = Task.Run(() =>
 			{
@@ -229,16 +249,24 @@ namespace Kts.ObjectSync.Tests
 				{
 					var idx = (j % 100) + 100;
 					j++;
-					lastServerVal = (int)accessor["Prop" + idx] + 1;
+					lastServerVal = j;
 					accessor["Prop" + idx] = lastServerVal;
+					var sw = Stopwatch.StartNew();
+					SpinWait.SpinUntil(() => sw.Elapsed.TotalMilliseconds > 0.02);
 				}
-				serverTransport.Flush().ConfigureAwait(false).GetAwaiter().GetResult();
+				serverTransport.Flush().Wait();
+				SpinWait.SpinUntil(() => serverObj.Contains(lastClientVal));
 			});
 			await Task.Delay(8000);
 			shouldRun = false;
 			await t1;
 			await t2;
-
+			swOuter.Stop();
+			_output.WriteLine("Sent {0} properties/sec from client.", lastClientVal / swOuter.Elapsed.TotalSeconds);
+			_output.WriteLine("Sent {0} properties/sec from server.", lastServerVal / swOuter.Elapsed.TotalSeconds);
+			//Assert.Equal(clientObj.Props.Take(100), serverObj.Props.Take(100));
+			//Assert.Equal(clientObj.Props.Skip(100).Take(100), serverObj.Props.Skip(100).Take(100));
+			clientTransport.Dispose();
 		}
 
 		[Fact]
@@ -264,6 +292,7 @@ namespace Kts.ObjectSync.Tests
 			var lastClientVal = -1;
 			var lastServerVal = -1;
 			var shouldRun = true;
+			var swOuter = Stopwatch.StartNew();
 			var t1 = Task.Run(() =>
 			{
 				var accessor = FastMember.ObjectAccessor.Create(clientObj);
@@ -272,10 +301,13 @@ namespace Kts.ObjectSync.Tests
 				{
 					var idx = j % 100;
 					j++;
-					lastClientVal = (int)accessor["Prop" + idx] + 1;
+					lastClientVal = j;
 					accessor["Prop" + idx] = lastClientVal;
+					var sw = Stopwatch.StartNew();
+					SpinWait.SpinUntil(() => sw.Elapsed.TotalMilliseconds > 0.01);
 				}
 				clientTransport.Flush();
+				SpinWait.SpinUntil(() => clientObj.Contains(lastServerVal));
 			});
 			var t2 = Task.Run(() =>
 			{
@@ -285,15 +317,22 @@ namespace Kts.ObjectSync.Tests
 				{
 					var idx = (j % 100) + 100;
 					j++;
-					lastServerVal = (int)accessor["Prop" + idx] + 1;
+					lastServerVal = j;
 					accessor["Prop" + idx] = lastServerVal;
+					var sw = Stopwatch.StartNew();
+					SpinWait.SpinUntil(() => sw.Elapsed.TotalMilliseconds > 0.01);
 				}
 				serverTransport.Flush();
+				SpinWait.SpinUntil(() => serverObj.Contains(lastClientVal));
 			});
 			await Task.Delay(8000);
 			shouldRun = false;
 			await t1;
 			await t2;
+			swOuter.Stop();
+			Assert.Equal(clientObj.Props, serverObj.Props);
+			_output.WriteLine("Sent {0} properties/sec from client.", lastClientVal / swOuter.Elapsed.TotalSeconds);
+			_output.WriteLine("Sent {0} properties/sec from server.", lastServerVal / swOuter.Elapsed.TotalSeconds);
 
 			clientTransport.Dispose();
 			serverTransport.Dispose();

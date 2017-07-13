@@ -29,30 +29,22 @@ namespace Kts.ObjectSync.Common
 
 	    private class ObjectForSynchronizationWrapper : ObjectForSynchronization
 	    {
-		    private readonly bool _shouldSendOnConnected;
-
-		    public ObjectForSynchronizationWrapper(string id, object child, bool shouldSendOnConnected)
+		    public ObjectForSynchronizationWrapper(string id, object child)
 		    {
-			    _shouldSendOnConnected = shouldSendOnConnected;
 			    ID = id;
 				Child = child;
 		    }
 
 			public override string ID { get; }
 
-		    protected internal override bool ShouldSendOnConnected(string fullPath)
-		    {
-			    return _shouldSendOnConnected;
-		    }
-
 		    // ReSharper disable once UnusedAutoPropertyAccessor.Local
 			public object Child { get; }
 	    }
 
 
-		public void Add(string id, object objectForSynchronization, bool shouldSendOnConnected = false)
+		public void Add(string id, object objectForSynchronization)
 		{
-			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization, shouldSendOnConnected));
+			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization));
 		}
 
 	    public void Remove(string idOfObjectForSynchronization)

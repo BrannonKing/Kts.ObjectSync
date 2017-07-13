@@ -1,8 +1,10 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net.WebSockets;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CommonSerializer;
@@ -16,10 +18,11 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 	public class ServerWebSocketTransport : ITransport
 	{
 		private readonly ICommonSerializer _serializer;
-		public event Action<string, object> Receive;
-		public event Action<ITransport> Connected;
+		//public event Action<ITransport> Connected;
 		private readonly IActor<RecyclableMemoryStream, Task> _actor;
 		private readonly List<WebSocket> _sockets = new List<WebSocket>();
+		private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
+		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 
 		public ServerWebSocketTransport(ICommonSerializer serializer, double aggregationDelay = 0.0)
 		{
@@ -44,14 +47,14 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				{
 					if (isFirst && mainBuffer.Length > 0)
 					{
-						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int) mainBuffer.Length);
 						await SendAsync(buffer, msgType);
 						mainBuffer.SetLength(0);
 					}
 
 					if (isFirst && isLast && mainBuffer.Length == 0)
 					{
-						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
+						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int) stream.Length);
 						await SendAsync(buffer, msgType);
 						return;
 					}
@@ -60,13 +63,17 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 
 					if (isLast && mainBuffer.Length > 0)
 					{
-						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int)mainBuffer.Length);
+						var buffer = new ArraySegment<byte>(mainBuffer.GetBuffer(), 0, (int) mainBuffer.Length);
 						await SendAsync(buffer, msgType);
 						mainBuffer.SetLength(0);
 					}
 				}
 				catch (TaskCanceledException)
 				{
+				}
+				catch
+				{
+					
 				}
 				finally
 				{
@@ -91,16 +98,15 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 			return builder.Map(path, app => app.UseMiddleware<InnerServerMiddlewareTransport>(this));
 		}
 
-		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
-
-		public async Task Send(string fullName, object value)
+		public void Send(string fullKey, Type type, object value)
 		{
-			var package = new Package { Name = fullName, Data = value };
-			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullName);
-			_serializer.Serialize(stream, package);
-			var result = await _actor.Push(stream).ConfigureAwait(false);
-			await result.ConfigureAwait(false);
-
+			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullKey);
+			var subject = Encoding.UTF8.GetBytes(fullKey);
+			var header = BitConverter.GetBytes(subject.Length);
+			stream.Write(header, 0, header.Length);
+			stream.Write(subject, 0, subject.Length);
+			_serializer.Serialize(stream, value, type);
+			_actor.Push(stream);
 		}
 
 		public async Task Flush()
@@ -109,37 +115,50 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 			await result;
 		}
 
-		private class OneTimeTransport : ITransport
+		public void RegisterReceiver(string parentKey, Type type, Action<string, object> action)
 		{
-			private readonly WebSocket _socket;
-			private readonly ICommonSerializer _serializer;
-
-			public OneTimeTransport(WebSocket socket, ICommonSerializer serializer)
-			{
-				_socket = socket;
-				_serializer = serializer;
-			}
-
-			public async Task Send(string fullName, object value)
-			{
-				var package = new Package { Name = fullName, Data = value };
-				using (var stream = (RecyclableMemoryStream) _mgr.GetStream(fullName))
-				{
-					_serializer.Serialize(stream, package);
-					var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
-					var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
-					await _socket.SendAsync(buffer, msgType, true, CancellationToken.None);
-				}
-			}
-
-			public void Flush()
-			{
-				throw new NotSupportedException();
-			}
-
-			public event Action<string, object> Receive = delegate { };
-			public event Action<ITransport> Connected = delegate { };
+			_cache[parentKey] = Tuple.Create(type, action);
 		}
+
+		public void UnregisterReceiver(string parentKey)
+		{
+			var ret = _cache.TryRemove(parentKey, out var _);
+			System.Diagnostics.Debug.Assert(ret);
+		}
+
+		//private class OneTimeTransport : ITransport
+		//{
+		//	private readonly WebSocket _socket;
+		//	private readonly ICommonSerializer _serializer;
+
+		//	public OneTimeTransport(WebSocket socket, ICommonSerializer serializer)
+		//	{
+		//		_socket = socket;
+		//		_serializer = serializer;
+		//	}
+
+		//	public async void Send(string fullKey, Type type, object value)
+		//	{
+		//		var package = new Package { Name = fullKey, Data = value };
+		//		using (var stream = (RecyclableMemoryStream) _mgr.GetStream(fullKey))
+		//		{
+		//			_serializer.Serialize(stream, package);
+		//			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
+		//			var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
+		//			await _socket.SendAsync(buffer, msgType, true, CancellationToken.None);
+		//		}
+		//	}
+			
+		//	public void RegisterReceiver(string fullKey, Type type, Action<string, object> action)
+		//	{
+		//		throw new NotSupportedException();
+		//	}
+
+		//	public void UnregisterReceiver(string fullKey)
+		//	{
+		//		throw new NotSupportedException();
+		//	}
+		//}
 
 		public class InnerServerMiddlewareTransport
 		{
@@ -164,7 +183,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				var socket = await context.WebSockets.AcceptWebSocketAsync();
 				lock (_parent._sockets)
 					_parent._sockets.Add(socket);
-				_parent.Connected.Invoke(new OneTimeTransport(socket, _parent._serializer));
+				//_parent.Connected.Invoke(new OneTimeTransport(socket, _parent._serializer));
 				await ReceiveForever(socket).ConfigureAwait(false);
 				lock (_parent._sockets)
 					_parent._sockets.Remove(socket);
@@ -176,7 +195,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 
 				try
 				{
-					using (var stream = _mgr.GetStream("_Receiver"))
+					using (var stream = (RecyclableMemoryStream)_mgr.GetStream("_Receiver"))
 					{
 						while (socket.State == WebSocketState.Open)
 						{
@@ -195,10 +214,22 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 							} while (!result.EndOfMessage);
 
 							stream.Position = 0;
-							while (stream.Position < stream.Length)
+
+							while (stream.Position < stream.Length - 4)
 							{
-								var package = _parent._serializer.Deserialize<Package>(stream);
-								_parent.Receive.Invoke(package.Name, package.Data);
+								var subjectLen = BitConverter.ToInt32(stream.GetBuffer(), (int)stream.Position);
+								stream.Position += 4;
+								var subject = Encoding.UTF8.GetString(stream.GetBuffer(), (int)stream.Position, subjectLen);
+								stream.Position += subjectLen;
+
+								_parent._cache.TryGetValue(subject, out var tuple);
+								if (tuple == null)
+								{
+									_parent._serializer.Deserialize<object>(stream);
+									continue;
+								}
+								var data = _parent._serializer.Deserialize(stream, tuple.Item1);
+								tuple.Item2.Invoke(subject, data);
 							}
 						}
 					}

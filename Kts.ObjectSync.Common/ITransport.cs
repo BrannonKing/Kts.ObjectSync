@@ -1,13 +1,13 @@
 ﻿using System;
-using System.Threading.Tasks;
 
 namespace Kts.ObjectSync.Common
 {
 	public interface ITransport
 	{
-		Task Send(string fullName, object value);
-		event Action<string, object> Receive;
-		event Action<ITransport> Connected;
+		// The Send & Register methods should use type <T>, but I don't have the kind of interface in FastMember
+		void Send(string fullKey, Type type, object value); // don't block; throw an exception if the queue is full (and expose the queue count and capacity at the transport level)
+		void RegisterReceiver(string fullKey, Type type, Action<string, object> action);
+		void UnregisterReceiver(string fullKey);
 	}
 
 	public sealed class Package

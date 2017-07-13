@@ -1,9 +1,9 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Dynamic;
 using System.Linq.Expressions;
-using System.Reflection;
 
 namespace Kts.ObjectSync.Common
 {
@@ -12,48 +12,51 @@ namespace Kts.ObjectSync.Common
 	    private readonly object _value;
 		private readonly FastMember.TypeAccessor _accessor;
 		private readonly string _name;
+	    internal readonly string Name;
 		private readonly ITransport _transport;
+		private readonly List<string> _blocked = new List<string>();
 
-	    private readonly Dictionary<string, PropertyNode> _children = new Dictionary<string, PropertyNode>();
-	    public readonly Type PropertyType;
+	    private readonly ConcurrentDictionary<string, PropertyNode> _children;
+	    public readonly Type PropertyType; 
 	    private readonly Func<string, bool> _shouldSend;
 	    private readonly Func<string, bool> _shouldReceive;
-	    private readonly Func<string, bool> _shouldSendOnConnected;
 
 	    public PropertyNode(ITransport transport, ObjectForSynchronization ofs)
-			:this(transport, ofs.ID, ofs, typeof(object), ofs.ShouldSend, ofs.ShouldReceive, ofs.ShouldSendOnConnected)
+			:this(transport, ofs.ID, ofs, typeof(object), ofs.ShouldSend, ofs.ShouldReceive)
 	    {
 	    }
 
 	    public PropertyNode(ITransport transport, string name, object value, Type propertyType, 
-			Func<string, bool> shouldSend, Func<string, bool> shouldReceive, Func<string, bool> shouldSendOnConnected)
+			Func<string, bool> shouldSend, Func<string, bool> shouldReceive)
 	    {
 		    PropertyType = propertyType;
-		    _value = value; // we don't change ourself; only our parent can do that
 		    _shouldSend = shouldSend;
 		    _shouldReceive = shouldReceive;
-		    _shouldSendOnConnected = shouldSendOnConnected;
-		    // loop through all the properties and create children
-			_name = name + ".";
+		    Name = name;
 			_transport = transport;
 
 		    if (value != null)
 		    {
-				var type = value.GetType();
-			    if (!FastMember.TypeHelpers._IsValueType(type) && type != typeof(string))
+				if (!FastMember.TypeHelpers._IsValueType(propertyType) && propertyType != typeof(string))
 			    {
-					_accessor = FastMember.TypeAccessor.Create(type);
+				    _name = name + ".";
+					_value = value; // we don't change ourself; only our parent can do that
+					_accessor = FastMember.TypeAccessor.Create(value.GetType());
+					_children = new ConcurrentDictionary<string, PropertyNode>();
 				    if (_accessor.GetMembersSupported)
 				    {
 					    foreach (var member in _accessor.GetMembers())
 					    {
 						    var childValue = _accessor[value, member.Name];
+						    PropertyNode node;
 						    if (childValue is ObjectForSynchronization ofs)
-							    _children.Add(member.Name, new PropertyNode(_transport, ofs));
+							    node = new PropertyNode(_transport, ofs);
 						    else
-							    _children.Add(member.Name, new PropertyNode(_transport, _name + member.Name,
-								    childValue, member.Type, _shouldSend, _shouldReceive, null));
-					    }
+							    node = new PropertyNode(_transport, _name + member.Name,
+								    childValue, member.Type, _shouldSend, _shouldReceive);
+						    _children[member.Name] = node;
+						    _transport.RegisterReceiver(node.Name, node.PropertyType, OnReceivedValue);
+						}
 				    }
 				    else if (value is IDynamicMetaObjectProvider dmop)
 				    {
@@ -61,81 +64,45 @@ namespace Kts.ObjectSync.Common
 					    foreach (var childName in names)
 					    {
 						    var childValue = _accessor[value, childName];
+						    PropertyNode node;
 						    if (childValue is ObjectForSynchronization ofs)
-							    _children.Add(childName, new PropertyNode(_transport, ofs));
+							    node = new PropertyNode(_transport, ofs);
 						    else
-							    _children.Add(childName, new PropertyNode(_transport, _name + childName,
-								    childValue, childValue?.GetType(), _shouldSend, _shouldReceive, null));
+							    node = new PropertyNode(_transport, _name + childName,
+								    childValue, childValue?.GetType() ?? typeof(object), _shouldSend, _shouldReceive);
+						    _children[childName] = node;
+							_transport.RegisterReceiver(node.Name, node.PropertyType, OnReceivedValue);
 					    }
-				    }
+					}
 				    if (value is INotifyPropertyChanged npc)
 					    npc.PropertyChanged += OnPropertyChanged;
-					_transport.Receive += OnReceivedValue;
 				}
 			}
-
-		    if (shouldSendOnConnected != null)
-		    {
-			    _transport.Connected += OnConnected; // event should trigger on subscribe
-		    }
 		}
-
-	    private void OnConnected(ITransport transport)
-	    {
-		    lock (_children)
-		    {
-			    foreach (var kvp in _children)
-			    {
-				    var fullName = _name + kvp.Key;
-					if (_shouldSendOnConnected.Invoke(fullName))
-				    {
-					    if (_shouldSend != null && !_shouldSend.Invoke(fullName))
-						    continue;
-					    transport.Send(fullName, kvp.Value._value);
-					}
-				}
-		    }
-	    }
 
 	    public void Dispose()
 		{
 			if (_value is INotifyPropertyChanged npc)
 				npc.PropertyChanged -= OnPropertyChanged;
-			_transport.Receive -= OnReceivedValue;
-			_transport.Connected -= OnConnected;
-			lock (_children)
+			if (_children != null)
 				foreach (var kvp in _children)
+				{
+					_transport.UnregisterReceiver(kvp.Value.Name);
 					kvp.Value.Dispose();
+				}
 		}
 
 		private void OnReceivedValue(string name, object value)
 		{
-			if (!name.StartsWith(_name))
-				return; // TODO: optimize this
-
-			var childName = name.Substring(_name.Length);
-			if (childName.Contains("."))
-				return;
-
+			System.Diagnostics.Debug.Assert(name.StartsWith(_name));
 			if (_shouldReceive != null && !_shouldReceive.Invoke(name))
 				return;
 
-			lock (_children)
-			{
-				if (_children.TryGetValue(childName, out var node))
-				{
-					node.Dispose();
-					if (node.PropertyType.IsInstanceOfType(value))
-						_accessor[_value, childName] = value;
-					else
-						_accessor[_value, childName] = Convert.ChangeType(value, node.PropertyType);
-
-					if (value is ObjectForSynchronization ofs)
-						_children[childName] = new PropertyNode(_transport, ofs);
-					else
-						_children[childName] = new PropertyNode(_transport, name, value, node.PropertyType, _shouldSend, _shouldReceive, null);
-				}
-			}
+			var childName = name.Substring(_name.Length);
+			System.Diagnostics.Debug.Assert(!childName.Contains("."));
+			lock (_blocked) _blocked.Add(childName);
+			_accessor[_value, childName] = value;
+			lock (_blocked) _blocked.Remove(childName);
 		}
 
 		private void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
@@ -150,27 +117,40 @@ namespace Kts.ObjectSync.Common
 			// we could do better than that by pushing an update through our tree
 			// but it would be rare that we get a PropertyChanged event where the whole thing didn't change
 			// hopefully they change their properties on the same thread every time
-			object value;
-			lock (_children)
-			{
-				value = _accessor[_value, e.PropertyName]; // not sure this needs to be in the lock
-				if (_children.TryGetValue(e.PropertyName, out var node))
-					node.Dispose();
-				if (value is ObjectForSynchronization ofs)
-					_children[e.PropertyName] = new PropertyNode(_transport, ofs);
-				else
-					_children[e.PropertyName] = new PropertyNode(_transport, fullName, value,
-						node != null ? node.PropertyType : _accessor.GetMembers()[e.PropertyName].Type, 
-						_shouldSend, _shouldReceive, null);
-			}
+		    var childName = e.PropertyName;
+			var value = _accessor[_value, childName];
 
-			if (_shouldSend != null && !_shouldSend.Invoke(fullName))
+			// we can't allow the client to set this while the server is setting it and vice-versa
+
+		    var node = RebuildNode(fullName, childName, value);
+		    lock (_blocked)
+			    if (_blocked.Contains(childName))
+				    return;
+		    if (_shouldSend != null && !_shouldSend.Invoke(fullName))
 			    return;
-			 _transport.Send(fullName, value).Wait();
+			 _transport.Send(fullName, node.PropertyType, value);
 			
 			// that line doesn't work unless we're on a leaf node? 
 			// no; we can serialize and send the whole thing
 			// surely one serialize call is better than none
 		}
-	}
+
+	    private PropertyNode RebuildNode(string fullName, string childName, object value)
+	    {
+		    PropertyNode node;
+		    _children.TryGetValue(childName, out node);
+			if (node == null || node._name != null)
+		    {
+			    node?.Dispose();
+			    if (value is ObjectForSynchronization ofs)
+				    node = new PropertyNode(_transport, ofs);
+			    else
+				    node = new PropertyNode(_transport, fullName, value,
+					    node != null ? node.PropertyType : _accessor.GetMembers()[childName].Type,
+					    _shouldSend, _shouldReceive);
+			    _children[childName] = node;
+		    }
+		    return node;
+	    }
+    }
 }

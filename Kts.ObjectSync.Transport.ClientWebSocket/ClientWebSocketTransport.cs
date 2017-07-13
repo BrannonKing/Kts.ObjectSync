@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using Kts.ObjectSync.Common;
 using System.Threading.Tasks;
 using System.Threading;
 using System.Net.WebSockets;
+using System.Text;
 using CommonSerializer;
 using Microsoft.IO;
 using Kts.ActorsLite;
@@ -16,6 +18,8 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 		protected readonly CancellationTokenSource _exitSource = new CancellationTokenSource();
 		protected TaskCompletionSource<bool> _connectionCompletionSource = new TaskCompletionSource<bool>();
 		protected readonly IActor<RecyclableMemoryStream, Task> _actor;
+		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
+		private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
 
 		public ClientWebSocketTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
 		{
@@ -48,7 +52,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 					if (isFirst && isLast && mainBuffer.Length == 0)
 					{
-						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
+						var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int) stream.Length);
 						await _socket.SendAsync(buffer, msgType, true, _exitSource.Token);
 						return;
 					}
@@ -64,6 +68,10 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 				}
 				catch (TaskCanceledException)
 				{
+				}
+				catch
+				{
+					
 				}
 				finally
 				{
@@ -125,7 +133,7 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 			try
 			{
-				using (var stream = _mgr.GetStream("_Receiver"))
+				using (var stream = (RecyclableMemoryStream)_mgr.GetStream("_Receiver"))
 				{
 					while (_socket.State == WebSocketState.Open)
 					{
@@ -147,11 +155,21 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 
 						stream.Position = 0;
 
-						while (stream.Position < stream.Length)
+						while (stream.Position < stream.Length - 4)
 						{
-							var package = _serializer.Deserialize<Package>(stream); // it may be more efficient to group them all into one large package and only call the deserializer once
-							if (package?.Name != null)
-								Receive.Invoke(package.Name, package.Data);
+							var subjectLen = BitConverter.ToInt32(stream.GetBuffer(), (int) stream.Position);
+							stream.Position += 4;
+							var subject = Encoding.UTF8.GetString(stream.GetBuffer(), (int) stream.Position, subjectLen);
+							stream.Position += subjectLen;
+
+							_cache.TryGetValue(subject, out var tuple);
+							if (tuple == null)
+							{
+								_serializer.Deserialize<object>(stream);
+								continue;
+							}
+							var data = _serializer.Deserialize(stream, tuple.Item1);
+							tuple.Item2.Invoke(subject, data);							
 						}
 					}
 				}
@@ -165,7 +183,6 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 			await result.ConfigureAwait(false);
 		}
 
-		public event Action<string, object> Receive = delegate { };
 		private Action<ITransport> _connected;
 		public event Action<ITransport> Connected
 		{
@@ -177,24 +194,37 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 			remove => _connected = (Action<ITransport>)Delegate.Remove(_connected, value);
 		}
 
-		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
+		public void Dispose()
+		{
+			_exitSource.Cancel();
+		}
 
-		public async Task Send(string fullName, object value)
+		public int SendQueueCount => ((dynamic) _actor).ScheduledTasksCount;
+
+		public void Send(string fullKey, Type type, object value)
 		{
 			// we have to serialize it during the call to make sure that we get the right value
 			// if we lock the one big stream, we can't have multiple simultaneous serializations
 			// if we make a bunch of small streams and copy them all then we can
 			// it's a performance trade-off for multiple simulatenous writers vs reducing the memcpy by one
-			var package = new Package { Name = fullName, Data = value };
-			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullName);
-			_serializer.Serialize(stream, package);
-			var result = await _actor.Push(stream).ConfigureAwait(false);
-			await result.ConfigureAwait(false);
+			var stream = (RecyclableMemoryStream)_mgr.GetStream(fullKey);
+			var subject = Encoding.UTF8.GetBytes(fullKey);
+			var header = BitConverter.GetBytes(subject.Length);
+			stream.Write(header, 0, header.Length);
+			stream.Write(subject, 0, subject.Length);
+			_serializer.Serialize(stream, value, type);
+			_actor.Push(stream);
 		}
 
-		public void Dispose()
+		public void RegisterReceiver(string parentKey, Type type, Action<string, object> action)
 		{
-			_exitSource.Cancel();
+			_cache[parentKey] = Tuple.Create(type, action);
+		}
+
+		public void UnregisterReceiver(string parentKey)
+		{
+			var ret = _cache.TryRemove(parentKey, out var _);
+			System.Diagnostics.Debug.Assert(ret);
 		}
 	}
 }

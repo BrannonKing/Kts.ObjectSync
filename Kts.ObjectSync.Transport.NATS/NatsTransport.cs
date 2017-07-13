@@ -1,6 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.IO;
-using System.Threading.Tasks;
 using CommonSerializer;
 using Kts.ObjectSync.Common;
 using Microsoft.IO;
@@ -14,7 +14,8 @@ namespace Kts.ObjectSync.Transport.NATS
 	    private readonly IConnection _connection;
 	    private readonly IAsyncSubscription _subscription;
 	    private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
-	    private const string _prefix = "_ObjectSync.";
+	    private const string _prefix = "_ObjectSyncProperty.";
+	    private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
 
 		public NatsTransport(ICommonSerializer serializer, Uri serverAddress = null)
 	    {
@@ -25,7 +26,8 @@ namespace Kts.ObjectSync.Transport.NATS
 			    options.Servers = new []{ serverAddress.ToString() };
 		    else
 			    options.Servers = new []{ "localhost:4222" };
-		    options.AllowReconnect = true;
+		    options.SubChannelLength = 65536 * 10;
+			options.AllowReconnect = true;
 			_connection = cf.CreateConnection(options);
 		    _subscription = _connection.SubscribeAsync(_prefix + ">");
 		    _subscription.MessageHandler += OnMessageHandler;
@@ -41,33 +43,42 @@ namespace Kts.ObjectSync.Transport.NATS
 
 	    private void OnMessageHandler(object sender, MsgHandlerEventArgs e)
 	    {
+		    var subject = e.Message.Subject.Replace(_prefix, "");
+		    if (!_cache.TryGetValue(subject, out var tuple))
+			    return;
+
 		    using (var ms = new MemoryStream(e.Message.Data, false))
 		    {
-			    while (ms.Position < ms.Length)
-			    {
-				    var package = _serializer.Deserialize<Package>(ms);
-				    Receive?.Invoke(package.Name ?? e.Message.Subject.Replace(_prefix, ""), package.Data);
-			    }
+				var data = _serializer.Deserialize(ms, tuple.Item1);
+				tuple.Item2.Invoke(subject, data);
 		    }
 	    }
-
-	    public async Task Send(string fullName, object value)
-	    {
-		    var package = new Package {Data = value};
-		    using (var stream = (RecyclableMemoryStream) _mgr.GetStream(fullName))
-		    {
-				_serializer.Serialize(stream, package);
-				_connection.Publish(_prefix + fullName, stream.ToArray());
-		    }
-	    }
-
-	    public event Action<string, object> Receive;
-	    public event Action<ITransport> Connected;
+		
 	    public void Dispose()
 	    {
 		    _subscription.MessageHandler -= OnMessageHandler;
 		    _subscription.Dispose();
 			_connection.Dispose();
+	    }
+
+	    public void Send(string fullKey, Type type, object value)
+	    {
+			using (var stream = (RecyclableMemoryStream)_mgr.GetStream(fullKey))
+			{
+				_serializer.Serialize(stream, value, type);
+				_connection.Publish(_prefix + fullKey, stream.ToArray());
+			}
+		}
+
+		public void RegisterReceiver(string parentKey, Type type, Action<string, object> action)
+	    {
+		    _cache[parentKey] = Tuple.Create(type, action);
+	    }
+
+	    public void UnregisterReceiver(string parentKey)
+	    {
+		    var ret = _cache.TryRemove(parentKey, out var _);
+			System.Diagnostics.Debug.Assert(ret);
 	    }
     }
 }

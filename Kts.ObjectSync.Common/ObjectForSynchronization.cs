@@ -13,11 +13,5 @@ namespace Kts.ObjectSync.Common
 		{
 			return true;
 		}
-
-		protected internal virtual bool ShouldSendOnConnected(string fullPath)
-		{
-			return false;
-		}
-
 	}
 }
