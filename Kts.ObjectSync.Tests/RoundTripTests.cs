@@ -334,6 +334,8 @@ namespace Kts.ObjectSync.Tests
 			_output.WriteLine("Sent {0} properties/sec from client.", lastClientVal / swOuter.Elapsed.TotalSeconds);
 			_output.WriteLine("Sent {0} properties/sec from server.", lastServerVal / swOuter.Elapsed.TotalSeconds);
 
+			clientMgr.Remove("speedy");
+			serverMgr.Remove("speedy");
 			clientTransport.Dispose();
 			serverTransport.Dispose();
 		}

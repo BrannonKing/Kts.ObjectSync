@@ -14,7 +14,7 @@ namespace Kts.ObjectSync.Transport.NATS
 	    private readonly IConnection _connection;
 	    private readonly IAsyncSubscription _subscription;
 	    private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
-	    private const string _prefix = "_ObjectSyncProperty.";
+	    private const string _prefix = "ObjectSyncProperty.";
 	    private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
 
 		public NatsTransport(ICommonSerializer serializer, Uri serverAddress = null)
@@ -27,11 +27,20 @@ namespace Kts.ObjectSync.Transport.NATS
 		    else
 			    options.Servers = new []{ "localhost:4222" };
 		    options.SubChannelLength = 65536 * 10;
-			options.AllowReconnect = true;
+			options.AllowReconnect = true; // default attempt lasts 2 seconds
+		    options.MaxReconnect = int.MaxValue; // retry connection forever; our buffers may get full at some point
+		    options.ReconnectWait = 1500;
+		    options.AsyncErrorEventHandler = OnAsyncError;
+			//options.
 			_connection = cf.CreateConnection(options);
 		    _subscription = _connection.SubscribeAsync(_prefix + ">");
 		    _subscription.MessageHandler += OnMessageHandler;
 		    _subscription.Start();
+	    }
+
+	    private void OnAsyncError(object sender, ErrEventArgs e)
+	    {
+		    System.Diagnostics.Debug.WriteLine(e.Error);
 	    }
 
 	    public bool IsConnected => _connection.State == ConnState.CONNECTED;
