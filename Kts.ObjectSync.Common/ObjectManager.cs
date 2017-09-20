@@ -26,8 +26,8 @@ namespace Kts.ObjectSync.Common
 		    if (!_nodeCache.TryAdd(objectForSynchronization.ID, rootNode))
 			    throw new ArgumentException($"Object {objectForSynchronization.ID} added twice. Make sure IDs differ between objects.");
 
-			if (objectForSynchronization.ShouldGetOnConnected)
-				_transport.RegisterWantsAllOnConnected(objectForSynchronization.ID);
+			//if (objectForSynchronization.ShouldGetOnConnected)
+			//	_transport.RegisterWantsAllOnConnected(objectForSynchronization.ID);
 	    }
 
 	    private class ObjectForSynchronizationWrapper : ObjectForSynchronization
@@ -54,7 +54,7 @@ namespace Kts.ObjectSync.Common
 	    {
 		    if (_nodeCache.TryRemove(idOfObjectForSynchronization, out var node))
 		    {
-			    _transport.UnregisterWantsAllOnConnected(idOfObjectForSynchronization);
+			    //_transport.UnregisterWantsAllOnConnected(idOfObjectForSynchronization);
 			    node.Dispose(); // disposes all children as well
 		    }
 	    }

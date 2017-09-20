@@ -3,7 +3,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Dynamic;
+using System.Linq;
 using System.Linq.Expressions;
+using System.Reflection;
 
 namespace Kts.ObjectSync.Common
 {
@@ -37,7 +39,7 @@ namespace Kts.ObjectSync.Common
 
 		    if (value != null)
 		    {
-				if (!FastMember.TypeHelpers._IsValueType(propertyType) && propertyType != typeof(string))
+				if (!propertyType.IsValueType && propertyType != typeof(string))
 			    {
 				    _name = name + ".";
 					_value = value; // we don't change ourself; only our parent can do that
@@ -146,7 +148,7 @@ namespace Kts.ObjectSync.Common
 				    node = new PropertyNode(_transport, ofs);
 			    else
 				    node = new PropertyNode(_transport, fullName, value,
-					    node != null ? node.PropertyType : _accessor.GetMembers()[childName].Type,
+					    node != null ? node.PropertyType : _accessor.GetMembers().First(m => m.Name == childName).Type,
 					    _shouldSend, _shouldReceive);
 			    _children[childName] = node;
 		    }

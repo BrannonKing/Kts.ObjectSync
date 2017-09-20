@@ -239,7 +239,7 @@ namespace Kts.ObjectSync.Tests
 					SpinWait.SpinUntil(() => sw.Elapsed.TotalMilliseconds > 0.02);
 				}
 				clientTransport.Flush().Wait();
-				SpinWait.SpinUntil(() => clientObj.Contains(lastServerVal));
+				//SpinWait.SpinUntil(() => clientObj.Contains(lastServerVal));
 			});
 			var t2 = Task.Run(() =>
 			{
@@ -255,7 +255,7 @@ namespace Kts.ObjectSync.Tests
 					SpinWait.SpinUntil(() => sw.Elapsed.TotalMilliseconds > 0.02);
 				}
 				serverTransport.Flush().Wait();
-				SpinWait.SpinUntil(() => serverObj.Contains(lastClientVal));
+				//SpinWait.SpinUntil(() => serverObj.Contains(lastClientVal));
 			});
 			await Task.Delay(8000);
 			shouldRun = false;

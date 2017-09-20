@@ -1,35 +1,29 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>    
-    <TargetFramework>netcoreapp1.1</TargetFramework>    
+  <PropertyGroup>
+    <TargetFramework>netcoreapp2.0</TargetFramework>
     <OutputTypeEx>library</OutputTypeEx>
     <OutputType>Library</OutputType>
   </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
-
   <ItemGroup>
-	<PackageReference Include="CommonSerializer.Newtonsoft.Json" Version="1.1.1" />
-	<PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.1.0" />
-	<PackageReference Include="Microsoft.AspNetCore" Version="1.1.2" />
-	<PackageReference Include="Microsoft.AspNetCore.Server.Kestrel" Version="1.1.2" />
-	<PackageReference Include="Microsoft.AspNetCore.WebSockets.Server" Version="0.1.0" />
-	<PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.0.0" />
+    <PackageReference Include="CommonSerializer.Newtonsoft.Json" Version="1.1.1" />
+    <PackageReference Include="Microsoft.ApplicationInsights.AspNetCore" Version="2.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore" Version="2.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Server.Kestrel" Version="2.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.WebSockets.Server" Version="0.1.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.3.0" />
     <PackageReference Include="xunit" Version="2.2.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.2.0" />
   </ItemGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\Kts.ObjectSync.Common\Kts.ObjectSync.Common.csproj" />
     <ProjectReference Include="..\Kts.ObjectSync.Transport.AspNetCore\Kts.ObjectSync.Transport.AspNetCore.csproj" />
     <ProjectReference Include="..\Kts.ObjectSync.Transport.ClientWebSocket\Kts.ObjectSync.Transport.ClientWebSocket.csproj" />
     <ProjectReference Include="..\Kts.ObjectSync.Transport.NATS\Kts.ObjectSync.Transport.NATS.csproj" />
   </ItemGroup>
-
   <ItemGroup>
     <Service Include="{82a7f48d-3b50-4b1e-b82e-3ada8210c358}" />
   </ItemGroup>
-
 </Project>
