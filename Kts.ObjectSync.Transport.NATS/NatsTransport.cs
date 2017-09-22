@@ -15,9 +15,11 @@ namespace Kts.ObjectSync.Transport.NATS
 	    private readonly IAsyncSubscription _subscription;
 	    private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 	    private const string _prefix = "ObjectSyncProperty.";
-	    private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
+	    private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _receiverCache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
+        private readonly ConcurrentDictionary<string, Action> _getOnConnectCache = new ConcurrentDictionary<string, Action>();
 
-		public NatsTransport(ICommonSerializer serializer, Uri serverAddress = null)
+
+        public NatsTransport(ICommonSerializer serializer, Uri serverAddress = null)
 	    {
 		    _serializer = serializer;
 		    var cf = new ConnectionFactory();
@@ -31,6 +33,7 @@ namespace Kts.ObjectSync.Transport.NATS
 		    options.MaxReconnect = int.MaxValue; // retry connection forever; our buffers may get full at some point
 		    options.ReconnectWait = 1500;
 		    options.AsyncErrorEventHandler = OnAsyncError;
+            options.ReconnectedEventHandler = OnReconnected;
 			//options.
 			_connection = cf.CreateConnection(options);
 		    _subscription = _connection.SubscribeAsync(_prefix + ">");
@@ -38,7 +41,7 @@ namespace Kts.ObjectSync.Transport.NATS
 		    _subscription.Start();
 	    }
 
-	    private void OnAsyncError(object sender, ErrEventArgs e)
+        private void OnAsyncError(object sender, ErrEventArgs e)
 	    {
 		    System.Diagnostics.Debug.WriteLine(e.Error);
 	    }
@@ -53,12 +56,12 @@ namespace Kts.ObjectSync.Transport.NATS
 	    private void OnMessageHandler(object sender, MsgHandlerEventArgs e)
 	    {
 		    var subject = e.Message.Subject.Replace(_prefix, "");
-		    if (!_cache.TryGetValue(subject, out var tuple))
+		    if (!_receiverCache.TryGetValue(subject, out var tuple))
 			    return;
 
 		    using (var ms = new MemoryStream(e.Message.Data, false))
 		    {
-				var data = _serializer.Deserialize(ms, tuple.Item1);
+				var data = ms.Length <= 0 ? null : _serializer.Deserialize(ms, tuple.Item1);
 				tuple.Item2.Invoke(subject, data);
 		    }
 	    }
@@ -81,13 +84,33 @@ namespace Kts.ObjectSync.Transport.NATS
 
 		public void RegisterReceiver(string parentKey, Type type, Action<string, object> action)
 	    {
-		    _cache[parentKey] = Tuple.Create(type, action);
+		    _receiverCache[parentKey] = Tuple.Create(type, action);
 	    }
 
 	    public void UnregisterReceiver(string parentKey)
 	    {
-		    var ret = _cache.TryRemove(parentKey, out var _);
+		    var ret = _receiverCache.TryRemove(parentKey, out var _);
 			System.Diagnostics.Debug.Assert(ret);
 	    }
+
+        private void OnReconnected(object sender, ConnEventArgs e)
+        {
+            // request all the first-time transfers
+            foreach (var action in _getOnConnectCache.Values)
+                action.Invoke();
+        }
+
+        public void RegisterWantsAllOnConnected(string fullKey)
+        {
+            Action action = () => _connection.Publish(_prefix + fullKey + ObjectForSynchronization.WantsAllSuffix, new byte[0]);
+            _getOnConnectCache[fullKey] = action;
+            if (IsConnected)
+                action.Invoke();
+        }
+
+        public void UnregisterWantsAllOnConnected(string fullKey)
+        {
+            _getOnConnectCache.TryRemove(fullKey, out var _);
+        }
     }
 }

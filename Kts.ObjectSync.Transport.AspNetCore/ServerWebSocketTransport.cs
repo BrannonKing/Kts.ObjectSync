@@ -24,7 +24,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 		private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 
-		public ServerWebSocketTransport(ICommonSerializer serializer, double aggregationDelay = 0.0)
+        public ServerWebSocketTransport(ICommonSerializer serializer, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
 			var mainBuffer = (RecyclableMemoryStream)_mgr.GetStream("_MainServerBuffer");
@@ -126,41 +126,20 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 			System.Diagnostics.Debug.Assert(ret);
 		}
 
-		//private class OneTimeTransport : ITransport
-		//{
-		//	private readonly WebSocket _socket;
-		//	private readonly ICommonSerializer _serializer;
+        public void RegisterWantsAllOnConnected(string fullKey)
+        {
+            throw new NotSupportedException("Requesting all properties from a client on connection is not supported on this transport.");
+        }
 
-		//	public OneTimeTransport(WebSocket socket, ICommonSerializer serializer)
-		//	{
-		//		_socket = socket;
-		//		_serializer = serializer;
-		//	}
+        public void UnregisterWantsAllOnConnected(string fullKey)
+        {
+        }
 
-		//	public async void Send(string fullKey, Type type, object value)
-		//	{
-		//		var package = new Package { Name = fullKey, Data = value };
-		//		using (var stream = (RecyclableMemoryStream) _mgr.GetStream(fullKey))
-		//		{
-		//			_serializer.Serialize(stream, package);
-		//			var msgType = _serializer.StreamsUtf8 ? WebSocketMessageType.Text : WebSocketMessageType.Binary;
-		//			var buffer = new ArraySegment<byte>(stream.GetBuffer(), 0, (int)stream.Length);
-		//			await _socket.SendAsync(buffer, msgType, true, CancellationToken.None);
-		//		}
-		//	}
-			
-		//	public void RegisterReceiver(string fullKey, Type type, Action<string, object> action)
-		//	{
-		//		throw new NotSupportedException();
-		//	}
+        private void OnClientConnected(WebSocket socket)
+        {
+        }
 
-		//	public void UnregisterReceiver(string fullKey)
-		//	{
-		//		throw new NotSupportedException();
-		//	}
-		//}
-
-		public class InnerServerMiddlewareTransport
+        public class InnerServerMiddlewareTransport
 		{
 			private readonly RequestDelegate _next;
 			private readonly ServerWebSocketTransport _parent;
@@ -183,7 +162,7 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 				var socket = await context.WebSockets.AcceptWebSocketAsync();
 				lock (_parent._sockets)
 					_parent._sockets.Add(socket);
-				//_parent.Connected.Invoke(new OneTimeTransport(socket, _parent._serializer));
+				_parent.OnClientConnected(socket);
 				await ReceiveForever(socket).ConfigureAwait(false);
 				lock (_parent._sockets)
 					_parent._sockets.Remove(socket);
@@ -238,5 +217,5 @@ namespace Kts.ObjectSync.Transport.AspNetCore
 			}
 
 		}
-	}
+    }
 }

@@ -20,8 +20,9 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 		protected readonly IActor<RecyclableMemoryStream, Task> _actor;
 		private static readonly RecyclableMemoryStreamManager _mgr = new RecyclableMemoryStreamManager();
 		private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _cache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
+        private readonly ConcurrentDictionary<string, Action> _getOnConnectCache = new ConcurrentDictionary<string, Action>();
 
-		public ClientWebSocketTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
+        public ClientWebSocketTransport(ICommonSerializer serializer, Uri serverAddress, double reconnectDelay = 2.0, double aggregationDelay = 0.0)
 		{
 			_serializer = serializer;
 			var mainBuffer = (RecyclableMemoryStream)_mgr.GetStream("_MainClientBuffer");
@@ -104,6 +105,8 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 					if (_socket?.State == WebSocketState.Open)
 					{
 						_connectionCompletionSource.SetResult(true);
+                        foreach (var action in _getOnConnectCache.Values)
+                            action.Invoke();
 						try
 						{
 							await ReceiveForever();
@@ -226,5 +229,18 @@ namespace Kts.ObjectSync.Transport.ClientWebSocket
 			var ret = _cache.TryRemove(parentKey, out var _);
 			System.Diagnostics.Debug.Assert(ret);
 		}
-	}
+
+        public void RegisterWantsAllOnConnected(string fullKey)
+        {
+            Action action = () => Send(fullKey + ObjectForSynchronization.WantsAllSuffix, typeof(byte), (byte)0);
+            _getOnConnectCache[fullKey] = action;
+            if (_connectionCompletionSource.Task.IsCompleted)
+                action.Invoke();
+        }
+
+        public void UnregisterWantsAllOnConnected(string fullKey)
+        {
+            _getOnConnectCache.TryRemove(fullKey, out var _);
+        }
+    }
 }

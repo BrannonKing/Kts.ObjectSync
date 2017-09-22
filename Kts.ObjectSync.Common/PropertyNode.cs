@@ -26,9 +26,18 @@ namespace Kts.ObjectSync.Common
 	    public PropertyNode(ITransport transport, ObjectForSynchronization ofs)
 			:this(transport, ofs.ID, ofs, typeof(object), ofs.ShouldSend, ofs.ShouldReceive)
 	    {
-	    }
+            _transport.RegisterReceiver(ofs.ID + ObjectForSynchronization.WantsAllSuffix, typeof(object), OnWantsAll);
+        }
 
-	    public PropertyNode(ITransport transport, string name, object value, Type propertyType, 
+        private void OnWantsAll(string arg1, object arg2)
+        {
+            foreach(var child in _children.Values)
+            {
+                _transport.Send(child._name, child.PropertyType, child._value);
+            }
+        }
+
+        public PropertyNode(ITransport transport, string name, object value, Type propertyType, 
 			Func<string, bool> shouldSend, Func<string, bool> shouldReceive)
 	    {
 		    PropertyType = propertyType;
@@ -37,9 +46,9 @@ namespace Kts.ObjectSync.Common
 		    Name = name;
 			_transport = transport;
 
-		    if (value != null)
+            if (value != null)
 		    {
-				if (!propertyType.IsValueType && propertyType != typeof(string))
+				if (!propertyType.GetTypeInfo().IsValueType && propertyType != typeof(string))
 			    {
 				    _name = name + ".";
 					_value = value; // we don't change ourself; only our parent can do that

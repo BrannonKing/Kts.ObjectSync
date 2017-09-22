@@ -8,7 +8,9 @@ namespace Kts.ObjectSync.Common
 		void Send(string fullKey, Type type, object value); // don't block; throw an exception if the queue is full (and expose the queue count and capacity at the transport level)
 		void RegisterReceiver(string fullKey, Type type, Action<string, object> action);
 		void UnregisterReceiver(string fullKey);
-	}
+        void RegisterWantsAllOnConnected(string fullKey);
+        void UnregisterWantsAllOnConnected(string fullKey);
+    }
 
 	public sealed class Package
 	{

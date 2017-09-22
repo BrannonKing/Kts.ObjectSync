@@ -2,9 +2,13 @@ namespace Kts.ObjectSync.Common
 {
 	public abstract class ObjectForSynchronization
 	{
-		public abstract string ID { get; }
+        public const string WantsAllSuffix = "__WANTS_ALL";
 
-		protected internal virtual bool ShouldReceive(string fullPath)
+        public abstract string ID { get; }
+
+        protected internal virtual bool ShouldGetOnConnected { get { return true; } }
+
+        protected internal virtual bool ShouldReceive(string fullPath)
 		{
 			return true;
 		}

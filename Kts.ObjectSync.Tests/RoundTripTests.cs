@@ -208,7 +208,7 @@ namespace Kts.ObjectSync.Tests
 			var serverObj = new Speedy();
 			var serverTransport = new ServerWebSocketTransport(serializer, 0.0); // never throws
 			var serverMgr = new ObjectManager(serverTransport); // never throws
-			serverMgr.Add("speedy", serverObj); // never throws
+			serverMgr.Add("speedy", serverObj, false); // never throws
 			Console.WriteLine("Starting server...");
 			await Startup.StartServer(serverTransport); // should throw if it can't start
 
@@ -219,7 +219,7 @@ namespace Kts.ObjectSync.Tests
 			await clientTransport.HasConnected;
 
 			var clientObj = new Speedy();
-			clientMgr.Add("speedy", clientObj);
+			clientMgr.Add("speedy", clientObj, false);
 
 			var lastClientVal = -1;
 			var lastServerVal = -1;

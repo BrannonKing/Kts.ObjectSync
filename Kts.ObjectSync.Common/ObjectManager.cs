@@ -26,35 +26,38 @@ namespace Kts.ObjectSync.Common
 		    if (!_nodeCache.TryAdd(objectForSynchronization.ID, rootNode))
 			    throw new ArgumentException($"Object {objectForSynchronization.ID} added twice. Make sure IDs differ between objects.");
 
-			//if (objectForSynchronization.ShouldGetOnConnected)
-			//	_transport.RegisterWantsAllOnConnected(objectForSynchronization.ID);
+			if (objectForSynchronization.ShouldGetOnConnected)
+				_transport.RegisterWantsAllOnConnected(objectForSynchronization.ID);
 	    }
 
 	    private class ObjectForSynchronizationWrapper : ObjectForSynchronization
 	    {
-		    public ObjectForSynchronizationWrapper(string id, object child)
+            public ObjectForSynchronizationWrapper(string id, object child, bool getAllDataOnConnected)
 		    {
 			    ID = id;
-				Child = child;
-		    }
+                ShouldGetOnConnected = getAllDataOnConnected;
+                Child = child;
+            }
 
-			public override string ID { get; }
+            public override string ID { get; }
+            protected internal override bool ShouldGetOnConnected { get; }
 
-		    // ReSharper disable once UnusedAutoPropertyAccessor.Local
-			public object Child { get; }
-	    }
+            // ReSharper disable once UnusedAutoPropertyAccessor.Local
+            public object Child { get; }
+
+        }
 
 
-		public void Add(string id, object objectForSynchronization)
+		public void Add(string id, object objectForSynchronization, bool getAllDataOnConnected = true)
 		{
-			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization));
+			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization, getAllDataOnConnected));
 		}
 
 	    public void Remove(string idOfObjectForSynchronization)
 	    {
 		    if (_nodeCache.TryRemove(idOfObjectForSynchronization, out var node))
 		    {
-			    //_transport.UnregisterWantsAllOnConnected(idOfObjectForSynchronization);
+			    _transport.UnregisterWantsAllOnConnected(idOfObjectForSynchronization);
 			    node.Dispose(); // disposes all children as well
 		    }
 	    }
