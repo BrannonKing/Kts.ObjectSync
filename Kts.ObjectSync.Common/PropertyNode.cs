@@ -33,7 +33,7 @@ namespace Kts.ObjectSync.Common
         {
             foreach(var child in _children.Values)
             {
-                _transport.Send(child._name, child.PropertyType, child._value);
+                _transport.Send(child.Name, child.PropertyType, child._value);
             }
         }
 
@@ -46,12 +46,12 @@ namespace Kts.ObjectSync.Common
 		    Name = name;
 			_transport = transport;
 
+            _name = name + ".";
+            _value = value; // we don't change ourself; only our parent can do that
             if (value != null)
 		    {
-				if (!propertyType.GetTypeInfo().IsValueType && propertyType != typeof(string))
+                if (!propertyType.GetTypeInfo().IsValueType && propertyType != typeof(string))
 			    {
-				    _name = name + ".";
-					_value = value; // we don't change ourself; only our parent can do that
 					_accessor = FastMember.TypeAccessor.Create(value.GetType());
 					_children = new ConcurrentDictionary<string, PropertyNode>();
 				    if (_accessor.GetMembersSupported)
@@ -95,7 +95,8 @@ namespace Kts.ObjectSync.Common
 		{
 			if (_value is INotifyPropertyChanged npc)
 				npc.PropertyChanged -= OnPropertyChanged;
-			if (_children != null)
+            _transport.UnregisterReceiver(Name + ObjectForSynchronization.WantsAllSuffix);
+            if (_children != null)
 				foreach (var kvp in _children)
 				{
 					_transport.UnregisterReceiver(kvp.Value.Name);
