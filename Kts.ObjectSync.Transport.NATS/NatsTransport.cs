@@ -89,8 +89,7 @@ namespace Kts.ObjectSync.Transport.NATS
 
 	    public void UnregisterReceiver(string parentKey)
 	    {
-		    var ret = _receiverCache.TryRemove(parentKey, out var _);
-			System.Diagnostics.Debug.Assert(ret);
+		    _receiverCache.TryRemove(parentKey, out var _);
 	    }
 
         private void OnReconnected(object sender, ConnEventArgs e)

@@ -276,7 +276,7 @@ namespace Kts.ObjectSync.Tests
 			var serverObj = new Speedy();
 			var serverTransport = new NatsTransport(serializer); // never throws
 			var serverMgr = new ObjectManager(serverTransport); // never throws
-			serverMgr.Add("speedy", serverObj); // never throws
+			serverMgr.Add("speedy", serverObj, false); // never throws
 			Console.WriteLine("Starting server...");
 
 			Console.WriteLine("Starting client...");
@@ -287,7 +287,7 @@ namespace Kts.ObjectSync.Tests
 				await Task.Delay(5);
 
 			var clientObj = new Speedy();
-			clientMgr.Add("speedy", clientObj);
+			clientMgr.Add("speedy", clientObj, false);
 
 			var lastClientVal = -1;
 			var lastServerVal = -1;
