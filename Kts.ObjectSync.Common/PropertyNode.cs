@@ -24,7 +24,7 @@ namespace Kts.ObjectSync.Common
 	    private readonly Func<string, bool> _shouldReceive;
 
 	    public PropertyNode(ITransport transport, ObjectForSynchronization ofs)
-			:this(transport, ofs.ID, ofs, typeof(object), ofs.ShouldSend, ofs.ShouldReceive)
+			:this(transport, ofs.ID, ofs, typeof(ObjectForSynchronization), ofs.ShouldSend, ofs.ShouldReceive)
 	    {
             _transport.RegisterReceiver(ofs.ID + ObjectForSynchronization.WantsAllSuffix, typeof(object), OnWantsAll);
         }
@@ -33,7 +33,9 @@ namespace Kts.ObjectSync.Common
         {
             foreach(var child in _children.Values)
             {
-                _transport.Send(child.Name, child.PropertyType, child._value);
+                if (child._children == null) continue;
+                foreach(var inner_child in child._children.Values)
+                    _transport.Send(inner_child.Name, inner_child.PropertyType, inner_child._value);
             }
         }
 
@@ -113,7 +115,14 @@ namespace Kts.ObjectSync.Common
 			var childName = name.Substring(_name.Length);
 			System.Diagnostics.Debug.Assert(!childName.Contains("."));
 			lock (_blocked) _blocked.Add(childName);
-			_accessor[_value, childName] = value;
+            try
+            {
+                _accessor[_value, childName] = value;
+            }
+            catch(Exception e)
+            {
+                System.Diagnostics.Debug.WriteLine(e);
+            }
 			lock (_blocked) _blocked.Remove(childName);
 		}
 

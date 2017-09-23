@@ -339,5 +339,41 @@ namespace Kts.ObjectSync.Tests
 			clientTransport.Dispose();
 			serverTransport.Dispose();
 		}
-	}
+
+        [Fact]
+        public async Task TestSyncOnConnectNats()
+        {
+            var serializer = new JsonCommonSerializer();
+            var serverObj = new Tester { P1 = 3, P2 = 4, P3 = "howdy" };
+            var serverTransport = new NatsTransport(serializer); // never throws
+            var serverMgr = new ObjectManager(serverTransport); // never throws
+            serverMgr.Add("speedy", serverObj, false); // never throws
+            Console.WriteLine("Starting server...");
+
+            Console.WriteLine("Starting client...");
+            var clientTransport = new NatsTransport(serializer);
+            var clientMgr = new ObjectManager(clientTransport);
+
+            while (!serverTransport.IsConnected || !clientTransport.IsConnected)
+                await Task.Delay(5);
+
+            var clientObj = new Tester();
+            clientMgr.Add("speedy", clientObj, true);
+
+            clientTransport.Flush();
+
+            while (clientObj.P3 != "howdy")
+                Thread.Sleep(20);
+
+            Assert.Equal(3, clientObj.P1);
+            Assert.Equal(4, clientObj.P2);
+            Assert.Equal("howdy", clientObj.P3);
+
+            clientMgr.Remove("speedy");
+            serverMgr.Remove("speedy");
+            clientTransport.Dispose();
+            serverTransport.Dispose();
+        }
+
+    }
 }

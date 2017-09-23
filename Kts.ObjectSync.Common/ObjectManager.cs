@@ -48,7 +48,7 @@ namespace Kts.ObjectSync.Common
         }
 
 
-		public void Add(string id, object objectForSynchronization, bool getAllDataOnConnected = true)
+		public void Add(string id, object objectForSynchronization, bool getAllDataOnConnected = false)
 		{
 			Add(new ObjectForSynchronizationWrapper(id, objectForSynchronization, getAllDataOnConnected));
 		}
