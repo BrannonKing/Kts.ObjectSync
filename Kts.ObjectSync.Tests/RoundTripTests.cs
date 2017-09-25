@@ -13,6 +13,7 @@ using Kts.ObjectSync.Common;
 using Kts.ObjectSync.Transport.AspNetCore;
 using Kts.ObjectSync.Transport.ClientWebSocket;
 using Kts.ObjectSync.Transport.NATS;
+using Kts.ObjectSync.Transport.NetMQ;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
@@ -339,6 +340,71 @@ namespace Kts.ObjectSync.Tests
 			clientTransport.Dispose();
 			serverTransport.Dispose();
 		}
+		
+		[Fact]
+		public async Task SpeedTestNetMQ()
+		{
+			var serializer = new JsonCommonSerializer();
+			var serverObj = new Speedy();
+			var serverTransport = new NetMQTransport(serializer, true); // never throws
+			var serverMgr = new ObjectManager(serverTransport); // never throws
+			serverMgr.Add("speedy", serverObj, false); // never throws
+			Console.WriteLine("Starting server...");
+
+			Console.WriteLine("Starting client...");
+			var clientTransport = new NetMQTransport(serializer, false);
+			var clientMgr = new ObjectManager(clientTransport);
+
+			var clientObj = new Speedy();
+			clientMgr.Add("speedy", clientObj, false);
+
+			var lastClientVal = -1;
+			var lastServerVal = -1;
+			var shouldRun = true;
+			var swOuter = Stopwatch.StartNew();
+			var t1 = Task.Run(() =>
+			{
+				var accessor = FastMember.ObjectAccessor.Create(clientObj);
+				int j = 0;
+				while (shouldRun)
+				{
+					var idx = j % 100;
+					j++;
+					lastClientVal = j;
+					accessor["Prop" + idx] = lastClientVal;
+				}
+				//clientTransport.Flush();
+				//SpinWait.SpinUntil(() => clientObj.Contains(lastServerVal));
+			});
+			var t2 = Task.Run(() =>
+			{
+				var accessor = FastMember.ObjectAccessor.Create(serverObj);
+				int j = 0;
+				while (shouldRun)
+				{
+					var idx = (j % 100) + 100;
+					j++;
+					lastServerVal = j;
+					accessor["Prop" + idx] = lastServerVal;
+				}
+				//serverTransport.Flush();
+				//SpinWait.SpinUntil(() => serverObj.Contains(lastClientVal));
+			});
+			await Task.Delay(8000);
+			shouldRun = false;
+			await t1;
+			await t2;
+			swOuter.Stop();
+			Assert.Equal(clientObj.Props, serverObj.Props);
+			_output.WriteLine("Sent {0} properties/sec from client.", lastClientVal / swOuter.Elapsed.TotalSeconds);
+			_output.WriteLine("Sent {0} properties/sec from server.", lastServerVal / swOuter.Elapsed.TotalSeconds);
+
+			clientMgr.Remove("speedy");
+			serverMgr.Remove("speedy");
+			clientTransport.Dispose();
+			serverTransport.Dispose();
+		}
+
 
         [Fact]
         public async Task TestSyncOnConnectNats()

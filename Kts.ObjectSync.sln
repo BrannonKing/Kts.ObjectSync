@@ -13,6 +13,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kts.ObjectSync.Transport.Cl
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kts.ObjectSync.Transport.NATS", "Kts.ObjectSync.Transport.NATS\Kts.ObjectSync.Transport.NATS.csproj", "{10F9BEB7-05A7-4C4A-BB67-C2BC5953887C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Kts.ObjectSync.Transport.NetMQ", "Kts.ObjectSync.Transport.NetMQ\Kts.ObjectSync.Transport.NetMQ.csproj", "{BD128C5E-CC28-4E47-BBE5-A292AA176C5F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{10F9BEB7-05A7-4C4A-BB67-C2BC5953887C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{10F9BEB7-05A7-4C4A-BB67-C2BC5953887C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{10F9BEB7-05A7-4C4A-BB67-C2BC5953887C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BD128C5E-CC28-4E47-BBE5-A292AA176C5F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BD128C5E-CC28-4E47-BBE5-A292AA176C5F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BD128C5E-CC28-4E47-BBE5-A292AA176C5F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BD128C5E-CC28-4E47-BBE5-A292AA176C5F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
