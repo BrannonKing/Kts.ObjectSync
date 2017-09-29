@@ -7,6 +7,7 @@ using Kts.ObjectSync.Common;
 using Microsoft.IO;
 using NetMQ;
 using NetMQ.Sockets;
+using System.Threading.Tasks;
 
 namespace Kts.ObjectSync.Transport.NetMQ
 {
@@ -18,7 +19,7 @@ namespace Kts.ObjectSync.Transport.NetMQ
 	    private const string _prefix = "ObjectSyncProperty.";
 	    private readonly ConcurrentDictionary<string, Tuple<Type, Action<string, object>>> _receiverCache = new ConcurrentDictionary<string, Tuple<Type, Action<string, object>>>();
         private readonly ConcurrentDictionary<string, Action> _getOnConnectCache = new ConcurrentDictionary<string, Action>();
-
+        private readonly NetMQPoller _poller;
 
         public NetMQTransport(ICommonSerializer serializer, bool isServer, Uri serverAddress = null, int maxMessageBufferCount = 1000)
 	    {
@@ -26,37 +27,51 @@ namespace Kts.ObjectSync.Transport.NetMQ
 
 		    _socket = new RouterSocket();
 		    _socket.Options.ReceiveHighWatermark = maxMessageBufferCount;
-		    // _subscription.Options.Linger // keep messages after disconnect
-		    _socket.ReceiveReady += OnMessageHandler;
-		    if (isServer)
-			    _socket.Bind(serverAddress == null ? "tcp://localhost:12345" : serverAddress.ToString());
+            // _subscription.Options.Linger // keep messages after disconnect
+            var timer = new NetMQTimer(5);
+            _poller = new NetMQPoller { _socket, timer };
+            _socket.ReceiveReady += OnMessageHandler;
+            var address = serverAddress == null ? "tcp://localhost:12345" : serverAddress.ToString();
+            if (isServer)
+			    _socket.Bind(address);
 		    else
-		    	_socket.Connect(serverAddress == null ? "tcp://localhost:12345" : serverAddress.ToString());
-	    }
+		    	_socket.Connect(address);
 
-	    public void Flush() // TODO: add timeout to flush
-	    {
-		    while (_socket.HasOut)
-			    Thread.Yield();
+            _poller.RunAsync("NetMQPoller for " + address);
+        }
+
+        public void Flush() // TODO: add timeout to flush
+        {
+            //var task = new Task(() => {
+            //    while (_socket.HasOut) // doesn't work as it's "always true for the publisher" -- some bug
+            //        Thread.Sleep(1);
+            //});
+            //task.Start(_poller);
+            //task.Wait();
 	    }
 
 	    private void OnMessageHandler(object sender, NetMQSocketEventArgs e)
 	    {
-		    var msg = e.Socket.ReceiveMultipartMessage();
-		    var subject = msg[1].ConvertToString().Replace(_prefix, ""); // three frames: connection, subject, data
-		    if (!_receiverCache.TryGetValue(subject, out var tuple))
-			    return;
+            var msg = new NetMQMessage(3);
+            var received = -1;
+            while (e.Socket.TryReceiveMultipartMessage(ref msg) && ++received < 1000)
+            {
+                var subject = msg[1].ConvertToString().Replace(_prefix, ""); // three frames: connection, subject, data
+                if (!_receiverCache.TryGetValue(subject, out var tuple))
+                    continue;
 
-		    using (var ms = new MemoryStream(msg[2].Buffer, 0, msg[2].BufferSize, false))
-		    {
-				var data = ms.Length <= 0 ? null : _serializer.Deserialize(ms, tuple.Item1);
-				tuple.Item2.Invoke(subject, data);
-		    }
+                using (var ms = new MemoryStream(msg[2].Buffer, 0, msg[2].BufferSize, false))
+                {
+                    var data = ms.Length <= 0 ? null : _serializer.Deserialize(ms, tuple.Item1);
+                    tuple.Item2.Invoke(subject, data);
+                }
+            }
 	    }
 		
 	    public void Dispose()
 	    {
 		    _socket.ReceiveReady -= OnMessageHandler;
+            _poller.Dispose();
 		    _socket.Dispose();
 	    }
 
